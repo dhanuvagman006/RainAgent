@@ -17,7 +17,7 @@ import joblib
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.callbacks import (
-    EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, LambdaCallback
+    EarlyStopping, ModelCheckpoint, LambdaCallback
 )
 from tensorflow.keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
@@ -218,10 +218,9 @@ def train_models():
                 model_path, monitor='val_loss',
                 save_best_only=True, verbose=0
             ),
-            ReduceLROnPlateau(
-                monitor='val_loss', factor=0.5, patience=10,
-                min_lr=LR_MIN, verbose=1
-            ),
+            # NOTE: ReduceLROnPlateau is intentionally removed — it conflicts
+            # with LearningRateSchedule-based optimizers (cannot set .learning_rate
+            # on a schedule). CosineDecayWithWarmup already handles LR decay.
         ]
 
         history = model.fit(
