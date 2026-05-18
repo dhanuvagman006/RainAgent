@@ -4,6 +4,7 @@ import SidebarControls from './components/SidebarControls';
 import KPIDashboard from './components/KPIDashboard';
 import AnalyticsView from './components/AnalyticsView';
 import IrrigationTimeline from './components/IrrigationTimeline';
+import ValidationPanel from './components/ValidationPanel';
 import ModelDeepDive from './components/ModelDeepDive';
 import LeaderboardTable from './components/LeaderboardTable';
 import { CloudRain, Leaf } from 'lucide-react';
@@ -130,6 +131,14 @@ function App() {
                   weatherSummary={predictionData.simulated_weather_summary}
                 />
                 <IrrigationTimeline schedule={scheduleData} />
+
+                {/* ── Validation Panel — auto-fetches IMD ground-truth ── */}
+                <ValidationPanel
+                  predictionData={predictionData}
+                  selectedDate={formData.date}
+                  selectedModel={formData.model_name}
+                  horizon={formData.horizon}
+                />
               </>
             ) : (
               <div className="flex flex-col items-center justify-center pt-20 pb-10">

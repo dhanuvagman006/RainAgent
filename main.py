@@ -3,12 +3,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import json
 import os
+import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from simulator import generate_synthetic_weather
 from inference_service import inference_service
 from irrigation_optimizer import generate_irrigation_plan
+
+# ── Pre-load the historical dataset once at startup ──────────────────────────
+_CSV_PATH = "dakshina_kannada_rainfall_daily_2000_2024.csv"
+try:
+    _HISTORICAL_DF = pd.read_csv(_CSV_PATH).ffill().interpolate(
+        method='linear', limit_direction='both'
+    )
+except Exception:
+    _HISTORICAL_DF = None
 
 app = FastAPI(title="Smart Rainfall Prediction API", description="Module 2 Inference Engine")
 
@@ -51,6 +61,63 @@ def get_metrics():
     with open(metrics_path, "r") as f:
         data = json.load(f)
     return data
+
+
+# ── Validation response schema ────────────────────────────────────────────────
+class ValidationResponse(BaseModel):
+    date:                   str
+    imd_actual_rainfall_mm: Optional[float]
+    data_available:         bool
+    station:                str
+    source:                 str
+    dataset_range:          str
+    note:                   str
+
+@app.get("/validate-actual-rainfall", response_model=ValidationResponse)
+def validate_actual_rainfall(date: str):
+    """
+    Looks up the historically observed rainfall for a given date from the
+    NASA POWER / IMD-aligned Dakshina Kannada dataset (2000-2024).
+    Returns the actual prectotcorr value as ground-truth.
+    """
+    try:
+        target = datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    if _HISTORICAL_DF is None:
+        raise HTTPException(status_code=503, detail="Historical dataset not available.")
+
+    # Filter to the requested date
+    row = _HISTORICAL_DF[
+        (_HISTORICAL_DF['year']  == target.year) &
+        (_HISTORICAL_DF['month'] == target.month) &
+        (_HISTORICAL_DF['day']   == target.day)
+    ]
+
+    if row.empty:
+        return ValidationResponse(
+            date=date,
+            imd_actual_rainfall_mm=None,
+            data_available=False,
+            station="Dakshina Kannada Region (Mangaluru)",
+            source="India Meteorological Department (IMD) · NASA POWER",
+            dataset_range="2000-01-01 to 2024-12-31",
+            note="Date is outside the available observation window (2000–2024). "
+                 "Future dates have no ground-truth record yet.",
+        )
+
+    actual_mm = round(float(row['prectotcorr'].iloc[0]), 2)
+    return ValidationResponse(
+        date=date,
+        imd_actual_rainfall_mm=actual_mm,
+        data_available=True,
+        station="Dakshina Kannada Region (Mangaluru)",
+        source="India Meteorological Department (IMD) · NASA POWER",
+        dataset_range="2000-01-01 to 2024-12-31",
+        note="Ground-truth daily rainfall from the NASA POWER / IMD station network "
+             "co-located at Dakshina Kannada, Karnataka.",
+    )
 
 @app.post("/predict", response_model=PredictionResponse)
 def predict_rainfall(request: PredictionRequest):
