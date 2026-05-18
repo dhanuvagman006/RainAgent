@@ -1,0 +1,16 @@
+python3 -m venv venv
+source venv/bin/activate
+
+pip install -r requirements.txt
+
+
+python train.py
+
+uvicorn main:app --reload
+
+
+cd frontend
+
+npm install
+
+npm run dev
