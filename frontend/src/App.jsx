@@ -16,7 +16,7 @@ function App() {
     date: '2026-06-15',
     model_name: 'LSTM',
     horizon: 4,
-    crop_name: 'Banana',
+    crop_name: 'Arecanut',
     catchment_area: 150.0,
     cultivation_area: 1000.0,
     initial_tank_water: 2000.0,

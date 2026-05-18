@@ -74,7 +74,7 @@ export default function SidebarControls({ formData, setFormData, onSubmit, isLoa
             onChange={handleChange}
             className={inputClass + " cursor-pointer"}
           >
-            {["Black Pepper", "Banana", "Cocoa"].map(c => (
+            {["Arecanut", "Coconut", "Black Pepper"].map(c => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>

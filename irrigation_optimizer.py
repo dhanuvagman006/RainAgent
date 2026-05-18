@@ -3,9 +3,9 @@ from typing import List, Dict, Any
 from water_harvesting import TankStateTracker, calculate_harvestable_volume
 
 CROP_REGISTRY = {
-    "Black Pepper": {"kc": 0.80},
-    "Banana": {"kc": 1.15},
-    "Cocoa": {"kc": 0.95}
+    "Arecanut": {"kc": 1.10},
+    "Coconut": {"kc": 0.95},
+    "Black Pepper": {"kc": 0.80}
 }
 
 def calculate_eto(t_mean: float) -> float:
