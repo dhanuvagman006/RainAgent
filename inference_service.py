@@ -11,9 +11,23 @@ MODEL_NAMES = ["LSTM", "GRU", "Bi-LSTM", "1D-CNN", "CNN-LSTM", "Transformer"]
 # Default lookback — overridden by scaler_meta.json if present
 DEFAULT_X_DAYS = 60
 
+# ── Custom objects needed to load models compiled with composite_loss ────────
+def _nse_loss(y_true, y_pred):
+    residuals   = tf.reduce_sum(tf.square(y_true - y_pred))
+    mean_obs    = tf.reduce_mean(y_true)
+    denominator = tf.reduce_sum(tf.square(y_true - mean_obs)) + 1e-9
+    return residuals / denominator
+
+def _composite_loss(y_true, y_pred):
+    mse = tf.reduce_mean(tf.square(y_true - y_pred))
+    return 0.7 * _nse_loss(y_true, y_pred) + 0.3 * mse
+
+_CUSTOM_OBJECTS = {'nse_loss': _nse_loss, 'composite_loss': _composite_loss}
+
 class InferenceService:
     def __init__(self):
         self.models = {}
+        self.isotonic = {}          # per-model isotonic calibrators
         self.feature_scaler = None
         self.target_scaler = None
         self.target_transform = 'none'  # 'log1p' or 'none'
@@ -40,9 +54,19 @@ class InferenceService:
             for name in MODEL_NAMES:
                 model_path = os.path.join(MODELS_DIR, f"{name}.keras")
                 if os.path.exists(model_path):
-                    self.models[name] = load_model(model_path, compile=False)
+                    self.models[name] = load_model(
+                        model_path,
+                        compile=False,
+                        custom_objects=_CUSTOM_OBJECTS,
+                    )
                 else:
                     print(f"Warning: {model_path} not found.")
+
+                # Load isotonic calibrator if available
+                iso_path = os.path.join(MODELS_DIR, f"{name}_isotonic.pkl")
+                if os.path.exists(iso_path):
+                    self.isotonic[name] = joblib.load(iso_path)
+
             print("ML Artifacts loaded successfully.")
         except Exception as e:
             print(f"Error loading artifacts: {e}")
@@ -96,9 +120,23 @@ class InferenceService:
             final_pred_scaled = self.models[model_name].predict(X)
 
         # Inverse transform (handles log1p automatically)
-        final_pred = self._inverse_transform(final_pred_scaled)
+        final_pred = self._inverse_transform(final_pred_scaled).flatten()
+        final_pred = np.clip(final_pred, 0.0, None)
 
-        return final_pred.flatten().tolist()
+        # Apply isotonic calibration when available (reduces PBIAS, boosts NSE)
+        if model_name == "Ensemble":
+            # Average calibrated predictions per sub-model
+            cal_preds = []
+            for sub in ["Transformer", "Bi-LSTM", "CNN-LSTM"]:
+                if sub in self.isotonic:
+                    cal_preds.append(self.isotonic[sub].predict(final_pred))
+            if cal_preds:
+                final_pred = np.mean(cal_preds, axis=0)
+        elif model_name in self.isotonic:
+            final_pred = self.isotonic[model_name].predict(final_pred)
+
+        final_pred = np.clip(final_pred, 0.0, None)
+        return final_pred.tolist()
 
 # Singleton instance
 inference_service = InferenceService()
