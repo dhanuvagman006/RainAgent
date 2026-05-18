@@ -5,9 +5,10 @@ Key improvements for NSE ≥ 0.88:
   • Log1p target transform  → handles skewed zero-inflated rainfall distribution
   • Longer lookback (60 days) → captures seasonal patterns
   • Cosine-decay + warmup LR schedule
-  • Reduced batch size (32) for sharper gradients
+  • Batch size 128 + mixed float16 precision → ~2× GPU throughput
+  • tf.data pipeline with cache + prefetch → eliminates data starvation
   • Gradient clipping (clipnorm=1.0)
-  • ReduceLROnPlateau + EarlyStopping with generous patience (25)
+  • EarlyStopping with patience=12 (tight but fair)
   • MSE loss (unbiased for NSE optimisation)
   • Per-model best-weight restoration
 """
@@ -16,6 +17,9 @@ import json
 import joblib
 import numpy as np
 import tensorflow as tf
+
+# ── Mixed precision: ~2× faster on any Ampere/Turing GPU, no-op on CPU ──
+tf.keras.mixed_precision.set_global_policy('mixed_float16')
 from tensorflow.keras.callbacks import (
     EarlyStopping, ModelCheckpoint, LambdaCallback
 )
@@ -153,11 +157,11 @@ def train_models():
     os.makedirs(models_dir, exist_ok=True)
 
     # ── Hyper-parameters ──
-    X_DAYS     = 60      # increased from 30 → captures seasonal monsoon patterns
+    X_DAYS     = 60      # captures seasonal monsoon patterns
     Y_DAYS     = 1
     EPOCHS     = 150     # generous budget; EarlyStopping will cut it short
-    BATCH_SIZE = 32      # smaller batch → sharper gradient signal
-    PATIENCE   = 25      # EarlyStopping patience
+    BATCH_SIZE = 128     # larger batch → more GPU utilisation; cosine LR compensates
+    PATIENCE   = 12      # EarlyStopping patience (tighter = faster dead-run exit)
     LR_BASE    = 5e-4
     LR_MIN     = 5e-6
 
@@ -176,6 +180,22 @@ def train_models():
 
     input_shape = (X_DAYS, X_train.shape[2])
     models = get_all_models(input_shape, Y_DAYS)
+
+    # ── tf.data pipelines — cache in RAM, prefetch overlaps GPU+CPU ──
+    AUTOTUNE = tf.data.AUTOTUNE
+    train_ds = (
+        tf.data.Dataset.from_tensor_slices((X_train, y_train))
+        .cache()
+        .shuffle(buffer_size=len(X_train), seed=42, reshuffle_each_iteration=True)
+        .batch(BATCH_SIZE, drop_remainder=True)
+        .prefetch(AUTOTUNE)
+    )
+    val_ds = (
+        tf.data.Dataset.from_tensor_slices((X_test, y_test))
+        .cache()
+        .batch(BATCH_SIZE)
+        .prefetch(AUTOTUNE)
+    )
 
     # ── Pre-compute test labels in mm (for metric reporting) ──
     y_test_mm = inverse_transform_target(y_test, target_scaler).flatten()
@@ -224,12 +244,11 @@ def train_models():
         ]
 
         history = model.fit(
-            X_train, y_train,
-            validation_data=(X_test, y_test),
+            train_ds,
+            validation_data=val_ds,
             epochs=EPOCHS,
-            batch_size=BATCH_SIZE,
             callbacks=callbacks,
-            verbose=1
+            verbose=2   # one clean line per epoch; no per-batch progress bar I/O
         )
 
         # ── Evaluation in original mm scale ──
