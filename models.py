@@ -1,104 +1,285 @@
 import tensorflow as tf
+import keras
 from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.layers import (
-    LSTM, GRU, Bidirectional, Conv1D, MaxPooling1D, Dense, 
-    Flatten, Input, Dropout, GlobalAveragePooling1D, 
-    LayerNormalization, MultiHeadAttention, BatchNormalization
+    LSTM, GRU, Bidirectional, Conv1D, MaxPooling1D, Dense,
+    Flatten, Input, Dropout, GlobalAveragePooling1D,
+    LayerNormalization, MultiHeadAttention, BatchNormalization,
+    Add, Activation, SpatialDropout1D, AveragePooling1D,
+    Concatenate, Reshape, Lambda, Multiply
 )
+from tensorflow.keras.regularizers import l2
+import numpy as np
 
+
+# ─────────────────────────────────────────────
+# Helper: Residual LSTM Block
+# ─────────────────────────────────────────────
+def _residual_lstm_block(x, units, dropout_rate=0.2):
+    """LSTM block with residual skip connection (projects if needed)."""
+    lstm_out = LSTM(units, return_sequences=True)(x)
+    lstm_out = BatchNormalization()(lstm_out)
+    lstm_out = Dropout(dropout_rate)(lstm_out)
+
+    # Project input to same size if needed for residual
+    if x.shape[-1] != units:
+        x = Dense(units)(x)
+    out = Add()([x, lstm_out])
+    return out
+
+
+# ─────────────────────────────────────────────
+# 1. Deep LSTM with Residual Connections
+# ─────────────────────────────────────────────
 def build_lstm(input_shape, y_days):
-    model = Sequential([
-        Input(shape=input_shape),
-        LSTM(64, return_sequences=True),
-        BatchNormalization(),
-        Dropout(0.2),
-        LSTM(32),
-        BatchNormalization(),
-        Dropout(0.2),
-        Dense(32, activation='relu'),
-        Dense(y_days, activation='relu')
-    ], name='LSTM')
-    return model
-
-def build_gru(input_shape, y_days):
-    model = Sequential([
-        Input(shape=input_shape),
-        GRU(64, return_sequences=True),
-        BatchNormalization(),
-        Dropout(0.2),
-        GRU(32),
-        BatchNormalization(),
-        Dropout(0.2),
-        Dense(32, activation='relu'),
-        Dense(y_days, activation='relu')
-    ], name='GRU')
-    return model
-
-def build_bilstm(input_shape, y_days):
-    model = Sequential([
-        Input(shape=input_shape),
-        Bidirectional(LSTM(64, return_sequences=True)),
-        BatchNormalization(),
-        Dropout(0.2),
-        Bidirectional(LSTM(32)),
-        BatchNormalization(),
-        Dropout(0.2),
-        Dense(32, activation='relu'),
-        Dense(y_days, activation='relu')
-    ], name='Bi-LSTM')
-    return model
-
-def build_1d_cnn(input_shape, y_days):
-    model = Sequential([
-        Input(shape=input_shape),
-        Conv1D(filters=64, kernel_size=3, activation='relu', padding='causal'),
-        MaxPooling1D(pool_size=2),
-        Conv1D(filters=128, kernel_size=3, activation='relu', padding='causal'),
-        BatchNormalization(),
-        GlobalAveragePooling1D(),
-        Dropout(0.2),
-        Dense(64, activation='relu'),
-        Dense(y_days, activation='relu')
-    ], name='1D-CNN')
-    return model
-
-def build_cnn_lstm(input_shape, y_days):
-    model = Sequential([
-        Input(shape=input_shape),
-        Conv1D(filters=64, kernel_size=3, activation='relu', padding='causal'),
-        MaxPooling1D(pool_size=2),
-        LSTM(64),
-        BatchNormalization(),
-        Dropout(0.2),
-        Dense(32, activation='relu'),
-        Dense(y_days, activation='relu')
-    ], name='CNN-LSTM')
-    return model
-
-def build_transformer(input_shape, y_days):
-    # Time-Series Transformer block
     inputs = Input(shape=input_shape)
-    
-    # Self-Attention
-    attention_output = MultiHeadAttention(num_heads=4, key_dim=input_shape[1])(inputs, inputs)
-    attention_output = Dropout(0.2)(attention_output)
-    out1 = LayerNormalization(epsilon=1e-6)(inputs + attention_output)
-    
-    # Feed Forward
-    ffn_output = Dense(128, activation='relu')(out1)
-    ffn_output = Dense(input_shape[1])(ffn_output)
-    ffn_output = Dropout(0.2)(ffn_output)
-    out2 = LayerNormalization(epsilon=1e-6)(out1 + ffn_output)
-    
-    # Global Average Pooling and Output
-    x = GlobalAveragePooling1D()(out2)
+
+    x = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4))(inputs)
     x = BatchNormalization()(x)
     x = Dropout(0.2)(x)
+
+    x = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    x = LSTM(64, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    x = LSTM(32, return_sequences=False, kernel_regularizer=l2(1e-4))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.15)(x)
+
+    x = Dense(64, activation='relu', kernel_regularizer=l2(1e-4))(x)
+    x = Dense(32, activation='relu')(x)
+    outputs = Dense(y_days, activation='linear')(x)
+
+    model = Model(inputs=inputs, outputs=outputs, name='LSTM')
+    return model
+
+
+# ─────────────────────────────────────────────
+# 2. Deep Stacked GRU
+# ─────────────────────────────────────────────
+def build_gru(input_shape, y_days):
+    inputs = Input(shape=input_shape)
+
+    x = GRU(128, return_sequences=True, kernel_regularizer=l2(1e-4),
+            recurrent_dropout=0.1)(inputs)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    x = GRU(128, return_sequences=True, kernel_regularizer=l2(1e-4),
+            recurrent_dropout=0.1)(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    x = GRU(64, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    x = GRU(32, return_sequences=False)(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.15)(x)
+
+    x = Dense(64, activation='relu', kernel_regularizer=l2(1e-4))(x)
+    x = Dense(32, activation='relu')(x)
+    outputs = Dense(y_days, activation='linear')(x)
+
+    model = Model(inputs=inputs, outputs=outputs, name='GRU')
+    return model
+
+
+# ─────────────────────────────────────────────
+# 3. Bidirectional LSTM with Attention
+# ─────────────────────────────────────────────
+def build_bilstm(input_shape, y_days):
+    inputs = Input(shape=input_shape)
+
+    x = Bidirectional(LSTM(64, return_sequences=True,
+                           kernel_regularizer=l2(1e-4)))(inputs)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    x = Bidirectional(LSTM(64, return_sequences=True,
+                           kernel_regularizer=l2(1e-4)))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    x = Bidirectional(LSTM(32, return_sequences=True,
+                           kernel_regularizer=l2(1e-4)))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    # Soft attention pooling (pure Keras ops — no raw tf calls)
+    attn_weights = Dense(1, activation='softmax')(x)           # (batch, T, 1)
+    # Weighted context vector: sum(x * weights) over time axis
+    x = Multiply()([x, attn_weights])                         # (batch, T, features)
+    x = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)        # (batch, features)
+
+    x = Dense(64, activation='relu', kernel_regularizer=l2(1e-4))(x)
+    x = Dropout(0.15)(x)
+    x = Dense(32, activation='relu')(x)
+    outputs = Dense(y_days, activation='linear')(x)
+
+    model = Model(inputs=inputs, outputs=outputs, name='Bi-LSTM')
+    return model
+
+
+# ─────────────────────────────────────────────
+# 4. Deep Dilated Temporal CNN (TCN-style)
+# ─────────────────────────────────────────────
+def build_1d_cnn(input_shape, y_days):
+    inputs = Input(shape=input_shape)
+
+    # Multi-scale temporal feature extraction
+    def dilated_block(x, filters, dilation):
+        conv = Conv1D(filters, kernel_size=3, dilation_rate=dilation,
+                      padding='causal', activation='relu',
+                      kernel_regularizer=l2(1e-4))(x)
+        conv = BatchNormalization()(conv)
+        # Residual projection if channel size differs
+        if x.shape[-1] != filters:
+            x = Conv1D(filters, kernel_size=1, padding='same')(x)
+        return Add()([x, conv])
+
+    x = Conv1D(64, kernel_size=1, padding='causal', activation='relu')(inputs)  # stem
+
+    x = dilated_block(x, 64, dilation=1)
+    x = Dropout(0.15)(x)
+    x = dilated_block(x, 64, dilation=2)
+    x = Dropout(0.15)(x)
+    x = dilated_block(x, 128, dilation=4)
+    x = Dropout(0.15)(x)
+    x = dilated_block(x, 128, dilation=8)
+    x = Dropout(0.15)(x)
+    x = dilated_block(x, 128, dilation=16)
+    x = Dropout(0.15)(x)
+
+    x = GlobalAveragePooling1D()(x)
+    x = Dense(128, activation='relu', kernel_regularizer=l2(1e-4))(x)
+    x = Dropout(0.2)(x)
     x = Dense(64, activation='relu')(x)
-    outputs = Dense(y_days, activation='relu')(x)
-    
+    outputs = Dense(y_days, activation='linear')(x)
+
+    model = Model(inputs=inputs, outputs=outputs, name='1D-CNN')
+    return model
+
+
+# ─────────────────────────────────────────────
+# 5. CNN-LSTM Hybrid with Attention
+# ─────────────────────────────────────────────
+def build_cnn_lstm(input_shape, y_days):
+    inputs = Input(shape=input_shape)
+
+    # CNN feature extractor
+    x = Conv1D(64, kernel_size=3, activation='relu', padding='causal',
+               kernel_regularizer=l2(1e-4))(inputs)
+    x = BatchNormalization()(x)
+    x = Conv1D(128, kernel_size=3, activation='relu', padding='causal',
+               kernel_regularizer=l2(1e-4))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.15)(x)
+    x = Conv1D(64, kernel_size=1, activation='relu', padding='causal')(x)
+    x = BatchNormalization()(x)
+
+    # LSTM temporal modelling
+    x = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    x = LSTM(64, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    # Attention pooling (pure Keras ops)
+    attn_weights = Dense(1, activation='softmax')(x)
+    x = Multiply()([x, attn_weights])
+    x = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)
+
+    x = Dense(128, activation='relu', kernel_regularizer=l2(1e-4))(x)
+    x = Dropout(0.15)(x)
+    x = Dense(64, activation='relu')(x)
+    outputs = Dense(y_days, activation='linear')(x)
+
+    model = Model(inputs=inputs, outputs=outputs, name='CNN-LSTM')
+    return model
+
+
+# ─────────────────────────────────────────────
+# 6. Multi-Head Transformer with Positional Encoding
+# ─────────────────────────────────────────────
+def _positional_encoding(seq_len, d_model):
+    """Generates a fixed sinusoidal positional encoding tensor."""
+    positions = tf.cast(tf.range(seq_len)[:, tf.newaxis], tf.float32)
+    dims = tf.cast(tf.range(d_model)[tf.newaxis, :], tf.float32)
+    angle_rates = 1 / tf.pow(10000.0, (2 * (dims // 2)) / tf.cast(d_model, tf.float32))
+    angle_rads = positions * angle_rates
+    sines = tf.math.sin(angle_rads[:, 0::2])
+    cosines = tf.math.cos(angle_rads[:, 1::2])
+    pos_enc = tf.concat([sines, cosines], axis=-1)
+    return pos_enc[tf.newaxis, :, :]  # (1, seq_len, d_model)
+
+
+class PositionalEncoding(tf.keras.layers.Layer):
+    def __init__(self, seq_len, d_model, **kwargs):
+        super().__init__(**kwargs)
+        self.seq_len = seq_len
+        self.d_model = d_model
+        self.pos_enc = _positional_encoding(seq_len, d_model)
+
+    def call(self, x):
+        return x + tf.cast(self.pos_enc[:, :tf.shape(x)[1], :], x.dtype)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({'seq_len': self.seq_len, 'd_model': self.d_model})
+        return config
+
+
+def _transformer_block(x, d_model, num_heads, ff_dim, dropout_rate=0.1):
+    """Single Transformer encoder block."""
+    # Multi-head self-attention
+    attn_out = MultiHeadAttention(num_heads=num_heads, key_dim=d_model // num_heads,
+                                  dropout=dropout_rate)(x, x)
+    attn_out = Dropout(dropout_rate)(attn_out)
+    out1 = LayerNormalization(epsilon=1e-6)(x + attn_out)
+
+    # Point-wise FFN
+    ffn = Dense(ff_dim, activation='relu', kernel_regularizer=l2(1e-4))(out1)
+    ffn = Dropout(dropout_rate)(ffn)
+    ffn = Dense(d_model, kernel_regularizer=l2(1e-4))(ffn)
+    ffn = Dropout(dropout_rate)(ffn)
+    out2 = LayerNormalization(epsilon=1e-6)(out1 + ffn)
+    return out2
+
+
+def build_transformer(input_shape, y_days):
+    seq_len, n_features = input_shape
+    d_model = 64
+
+    inputs = Input(shape=input_shape)
+
+    # Project features to d_model
+    x = Dense(d_model, activation='relu', kernel_regularizer=l2(1e-4))(inputs)
+    x = PositionalEncoding(seq_len, d_model)(x)
+    x = Dropout(0.1)(x)
+
+    # 4 stacked transformer blocks
+    x = _transformer_block(x, d_model=d_model, num_heads=4, ff_dim=256, dropout_rate=0.1)
+    x = _transformer_block(x, d_model=d_model, num_heads=4, ff_dim=256, dropout_rate=0.1)
+    x = _transformer_block(x, d_model=d_model, num_heads=4, ff_dim=128, dropout_rate=0.1)
+    x = _transformer_block(x, d_model=d_model, num_heads=4, ff_dim=128, dropout_rate=0.1)
+
+    x = GlobalAveragePooling1D()(x)
+    x = Dense(128, activation='relu', kernel_regularizer=l2(1e-4))(x)
+    x = Dropout(0.2)(x)
+    x = Dense(64, activation='relu')(x)
+    outputs = Dense(y_days, activation='linear')(x)
+
     model = Model(inputs=inputs, outputs=outputs, name='Transformer')
     return model
+
 
 def get_all_models(input_shape, y_days):
     return [

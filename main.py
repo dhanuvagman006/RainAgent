@@ -136,7 +136,7 @@ def predict_rainfall(request: PredictionRequest):
 
     # 1. Generate synthetic features
     try:
-        synthetic_data = generate_synthetic_weather(request.date, lookback_days=30, horizon=request.horizon)
+        synthetic_data = generate_synthetic_weather(request.date, lookback_days=60, horizon=request.horizon)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Simulation failed: {e}")
         
@@ -149,7 +149,7 @@ def predict_rainfall(request: PredictionRequest):
     # 3. Format Response
     dates = [(target_date + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(request.horizon)]
     
-    last_day_data = synthetic_data[29]
+    last_day_data = synthetic_data[59]
     weather_summary = {
         "ps": round(float(last_day_data[3]), 2),
         "t2m": round(float(last_day_data[4]), 2),

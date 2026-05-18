@@ -1,4 +1,5 @@
 import os
+import json
 import joblib
 import numpy as np
 import tensorflow as tf
@@ -7,24 +8,35 @@ from tensorflow.keras.models import load_model
 MODELS_DIR = "models"
 MODEL_NAMES = ["LSTM", "GRU", "Bi-LSTM", "1D-CNN", "CNN-LSTM", "Transformer"]
 
+# Default lookback — overridden by scaler_meta.json if present
+DEFAULT_X_DAYS = 60
+
 class InferenceService:
     def __init__(self):
         self.models = {}
         self.feature_scaler = None
         self.target_scaler = None
+        self.target_transform = 'none'  # 'log1p' or 'none'
+        self.x_days = DEFAULT_X_DAYS
         self.load_artifacts()
 
     def load_artifacts(self):
         try:
-            # We assume the models directory exists and contains these from Module 1
             feature_scaler_path = os.path.join(MODELS_DIR, 'feature_scaler.pkl')
-            target_scaler_path = os.path.join(MODELS_DIR, 'target_scaler.pkl')
-            
+            target_scaler_path  = os.path.join(MODELS_DIR, 'target_scaler.pkl')
+            meta_path           = os.path.join(MODELS_DIR, 'scaler_meta.json')
+
             if os.path.exists(feature_scaler_path) and os.path.exists(target_scaler_path):
                 self.feature_scaler = joblib.load(feature_scaler_path)
-                self.target_scaler = joblib.load(target_scaler_path)
-            
-            # Load models without compile=False to avoid custom_objects error for NSE
+                self.target_scaler  = joblib.load(target_scaler_path)
+
+            # Read metadata written by train.py (target transform + x_days)
+            if os.path.exists(meta_path):
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                self.target_transform = meta.get('target_transform', 'none')
+                self.x_days = int(meta.get('x_days', DEFAULT_X_DAYS))
+
             for name in MODEL_NAMES:
                 model_path = os.path.join(MODELS_DIR, f"{name}.keras")
                 if os.path.exists(model_path):
@@ -35,57 +47,57 @@ class InferenceService:
         except Exception as e:
             print(f"Error loading artifacts: {e}")
 
+    def _inverse_transform(self, scaled_pred):
+        """Undo MinMax scaling, then undo optional log1p."""
+        raw = self.target_scaler.inverse_transform(scaled_pred)
+        if self.target_transform == 'log1p':
+            raw = np.expm1(raw)
+        return np.maximum(raw, 0.0)
+
     def predict(self, model_name, synthetic_features, horizon):
         """
         synthetic_features: numpy array shape (total_days, num_features).
-                            total_days = 30 + horizon - 1
+                            total_days = x_days + horizon - 1
         """
         if self.feature_scaler is None or self.target_scaler is None:
             raise RuntimeError("Scalers are not loaded. Ensure Module 1 is trained.")
 
         # Scale features
         scaled_features = self.feature_scaler.transform(synthetic_features)
-        
-        # Create sliding windows of size 30
-        x_days = 30
+
+        x_days = self.x_days
         num_windows = len(scaled_features) - x_days + 1
-        
+
         if num_windows != horizon:
-            raise ValueError(f"Generated windows {num_windows} does not match horizon {horizon}.")
-            
+            raise ValueError(
+                f"Generated windows {num_windows} != horizon {horizon}. "
+                f"Ensure simulator uses lookback_days={x_days}."
+            )
+
         X = []
         for i in range(num_windows):
-            X.append(scaled_features[i:i+x_days])
-        X = np.array(X) # shape (horizon, 30, num_features)
+            X.append(scaled_features[i:i + x_days])
+        X = np.array(X)  # shape (horizon, x_days, num_features)
         
         # Determine which models to run
         if model_name == "Ensemble":
-            # Ensemble of top 3 typical best performers for sequential tasks
             top_models = ["Transformer", "Bi-LSTM", "CNN-LSTM"]
             preds = []
             for name in top_models:
                 if name in self.models:
-                    model = self.models[name]
-                    p = model.predict(X) # shape (horizon, 1)
+                    p = self.models[name].predict(X)
                     preds.append(p)
-            
             if not preds:
                 raise ValueError("None of the ensemble models are available.")
-                
-            avg_pred = np.mean(preds, axis=0) # shape (horizon, 1)
-            final_pred_scaled = avg_pred
+            final_pred_scaled = np.mean(preds, axis=0)
         else:
             if model_name not in self.models:
                 raise ValueError(f"Model {model_name} not found.")
-            model = self.models[model_name]
-            final_pred_scaled = model.predict(X) # shape (horizon, 1)
-            
-        # Inverse transform to get actual mm
-        final_pred = self.target_scaler.inverse_transform(final_pred_scaled)
-        
-        # Ensure no negative rainfall
-        final_pred = np.maximum(final_pred, 0)
-        
+            final_pred_scaled = self.models[model_name].predict(X)
+
+        # Inverse transform (handles log1p automatically)
+        final_pred = self._inverse_transform(final_pred_scaled)
+
         return final_pred.flatten().tolist()
 
 # Singleton instance

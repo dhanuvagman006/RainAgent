@@ -1,0 +1,18 @@
+{
+  "target_transform": "log1p",
+  "target_col": "prectotcorr",
+  "feature_cols": [
+    "year",
+    "month",
+    "day",
+    "ps",
+    "t2m",
+    "t2m_max",
+    "t2m_min",
+    "rh2m",
+    "ws2m",
+    "wd2m",
+    "allsky_sfc_sw_dwn"
+  ],
+  "x_days": 60
+}
