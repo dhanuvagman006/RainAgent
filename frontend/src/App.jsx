@@ -4,6 +4,7 @@ import SidebarControls from './components/SidebarControls';
 import KPIDashboard from './components/KPIDashboard';
 import AnalyticsView from './components/AnalyticsView';
 import IrrigationTimeline from './components/IrrigationTimeline';
+import ModelDeepDive from './components/ModelDeepDive';
 import LeaderboardTable from './components/LeaderboardTable';
 import { CloudRain, Leaf } from 'lucide-react';
 
@@ -21,11 +22,11 @@ function App() {
     max_tank_capacity: 10000.0
   });
 
-  const [metricsData, setMetricsData] = useState(null);
+  const [metricsData, setMetricsData]     = useState(null);
   const [predictionData, setPredictionData] = useState(null);
-  const [scheduleData, setScheduleData] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [scheduleData, setScheduleData]   = useState(null);
+  const [isLoading, setIsLoading]         = useState(false);
+  const [error, setError]                 = useState(null);
 
   // Load metrics on mount
   useEffect(() => {
@@ -39,23 +40,22 @@ function App() {
     setError(null);
     try {
       const predRes = await axios.post(`${API_BASE}/predict`, {
-        date: formData.date,
+        date:       formData.date,
         model_name: formData.model_name,
-        horizon: formData.horizon
+        horizon:    formData.horizon
       });
       setPredictionData(predRes.data);
 
       const irrRes = await axios.post(`${API_BASE}/calculate-irrigation-plan`, {
-        predicted_rainfall: predRes.data.predicted_rainfall_mm,
+        predicted_rainfall:    predRes.data.predicted_rainfall_mm,
         simulated_temperatures: Array(formData.horizon).fill(predRes.data.simulated_weather_summary.t2m),
-        crop_name: formData.crop_name,
-        catchment_area: formData.catchment_area,
-        cultivation_area: formData.cultivation_area,
-        initial_tank_water: formData.initial_tank_water,
-        max_tank_capacity: formData.max_tank_capacity
+        crop_name:             formData.crop_name,
+        catchment_area:        formData.catchment_area,
+        cultivation_area:      formData.cultivation_area,
+        initial_tank_water:    formData.initial_tank_water,
+        max_tank_capacity:     formData.max_tank_capacity
       });
       setScheduleData(irrRes.data.schedule);
-
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.detail || "An error occurred connecting to the backend.");
@@ -68,7 +68,8 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      {/* ── Top Header Bar ── */}
+
+      {/* ── Sticky Top Header ── */}
       <header className="bg-white border-b border-slate-100 shadow-sm sticky top-0 z-40">
         <div className="max-w-screen-2xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -85,7 +86,8 @@ function App() {
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+          <div className="hidden md:flex items-center gap-2 text-xs text-slate-500
+                          bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
             <Leaf className="w-3.5 h-3.5 text-emerald-600" />
             <span>Dakshina Kannada · AgTech Dashboard</span>
           </div>
@@ -95,6 +97,8 @@ function App() {
       {/* ── Main Layout ── */}
       <div className="max-w-screen-2xl mx-auto px-4 md:px-6 lg:px-8 py-6">
         <div className="flex flex-col md:flex-row gap-6">
+
+          {/* Sidebar */}
           <SidebarControls
             formData={formData}
             setFormData={setFormData}
@@ -102,17 +106,24 @@ function App() {
             isLoading={isLoading}
           />
 
+          {/* Main content column */}
           <main className="flex-1 min-w-0">
+
             {/* Error Banner */}
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl mb-6 text-sm flex items-center gap-2">
+              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3
+                              rounded-xl mb-6 text-sm flex items-center gap-2">
                 <span className="font-semibold">Error:</span> {error}
               </div>
             )}
 
+            {/* ── Section A: Prediction Results (shown after run) ── */}
             {predictionData && scheduleData ? (
               <>
-                <KPIDashboard predictionData={predictionData} finalTankStatus={finalTankStatus} />
+                <KPIDashboard
+                  predictionData={predictionData}
+                  finalTankStatus={finalTankStatus}
+                />
                 <AnalyticsView
                   metricsData={metricsData}
                   selectedModel={formData.model_name}
@@ -121,16 +132,28 @@ function App() {
                 <IrrigationTimeline schedule={scheduleData} />
               </>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center pt-24 pb-12">
+              <div className="flex flex-col items-center justify-center pt-20 pb-10">
                 <div className="p-6 bg-slate-100 rounded-full mb-5">
                   <CloudRain className="w-16 h-16 text-slate-300" />
                 </div>
-                <p className="text-slate-400 text-base font-medium">Configure the control panel and run prediction to view insights.</p>
-                <p className="text-slate-300 text-sm mt-1">Your forecasting results will appear here.</p>
+                <p className="text-slate-400 text-base font-medium">
+                  Configure the control panel and run prediction to view insights.
+                </p>
+                <p className="text-slate-300 text-sm mt-1">
+                  Your forecasting results will appear here.
+                </p>
               </div>
             )}
 
-            {metricsData && <LeaderboardTable metricsData={metricsData} />}
+            {/* ── Section B: Model Deep-Dive (always visible) ── */}
+            <ModelDeepDive
+              metricsData={metricsData}
+              selectedModel={formData.model_name}
+            />
+
+            {/* ── Section C: Global Leaderboard (always visible) ── */}
+            <LeaderboardTable metricsData={metricsData} />
+
           </main>
         </div>
       </div>
