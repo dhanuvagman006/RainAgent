@@ -1,17 +1,4 @@
-"""
-train.py — High-Accuracy Rainfall Forecasting Training Pipeline
-===============================================================
-Key improvements for NSE ≥ 0.88:
-  • Log1p target transform  → handles skewed zero-inflated rainfall distribution
-  • Longer lookback (60 days) → captures seasonal patterns
-  • Cosine-decay + warmup LR schedule
-  • Batch size 128 + mixed float16 precision → ~2× GPU throughput
-  • tf.data pipeline with cache + prefetch → eliminates data starvation
-  • Gradient clipping (clipnorm=1.0)
-  • EarlyStopping with patience=12 (tight but fair)
-  • MSE loss (unbiased for NSE optimisation)
-  • Per-model best-weight restoration
-"""
+
 import os
 import json
 import joblib
