@@ -363,9 +363,10 @@ def train_models():
     Y_DAYS       = 1
     EPOCHS       = 200      # generous budget; EarlyStopping exits early
     N_REPLICAS   = strategy.num_replicas_in_sync
-    # GPU (Colab T4/A100) benefits from large batches to saturate CUDA cores.
+    # GPU (Colab L4/A100/T4) benefits from very large batches to saturate CUDA cores.
+    # 15 GB VRAM → batch 2048 uses ~4 GB, leaving headroom for activations.
     # CPU is memory-bound so keep it at 128.
-    BATCH_SIZE   = (512 if using_gpu else 128) * N_REPLICAS
+    BATCH_SIZE   = (2048 if using_gpu else 128) * N_REPLICAS
     PATIENCE_ES  = 20       # give model time to escape plateau
     PATIENCE_LR  = 8        # ReduceLROnPlateau
     LR_BASE      = 3e-4 * (BATCH_SIZE / 128) ** 0.5  # linear LR scaling rule
@@ -446,6 +447,8 @@ def train_models():
                     optimizer=optimizer,
                     loss=composite_loss,    # ← DIRECTLY OPTIMISE NSE
                     metrics=['mae'],
+                    # XLA fuses LSTM/GRU ops into one GPU kernel → 2-4× faster
+                    jit_compile=using_gpu,
                 )
 
             model.summary(print_fn=lambda s: None)
