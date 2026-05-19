@@ -22,17 +22,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ── Station constants ──────────────────────────────────────────────────────
 LATITUDE  = 12.87
 LONGITUDE = 74.88
 TIMEZONE  = "Asia/Kolkata"
 
-# Open-Meteo Archive API endpoint
 OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
-# Open-Meteo daily variables → CSV column mapping
-# Note: Open-Meteo wind speed is in km/h; NASA/IMD is in m/s — we convert.
-# Note: Open-Meteo surface_pressure_mean is in hPa; NASA/IMD is in kPa — we convert.
 DAILY_VARS = [
     "precipitation_sum",        # → prectotcorr (mm/day)
     "surface_pressure_mean",    # → ps (kPa)
