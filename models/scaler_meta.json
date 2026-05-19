@@ -1,0 +1,30 @@
+{
+  "target_transform": "log1p",
+  "target_col": "prectotcorr",
+  "feature_cols": [
+    "year",
+    "month",
+    "day",
+    "ps",
+    "t2m",
+    "t2m_max",
+    "t2m_min",
+    "rh2m",
+    "ws2m",
+    "wd2m",
+    "allsky_sfc_sw_dwn",
+    "doy_sin",
+    "doy_cos",
+    "month_sin",
+    "month_cos",
+    "is_monsoon",
+    "rain_lag_1d",
+    "rain_lag_3d",
+    "rain_lag_7d",
+    "rain_roll7_mean",
+    "rain_roll30_mean",
+    "rain_roll7_std",
+    "wet_day_frac30"
+  ],
+  "x_days": 60
+}
