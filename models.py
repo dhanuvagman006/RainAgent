@@ -32,26 +32,37 @@ def _residual_lstm_block(x, units, dropout_rate=0.2):
 # 1. Deep LSTM with Residual Connections
 # ─────────────────────────────────────────────
 def build_lstm(input_shape, y_days):
+    """Deep LSTM with residual connections + soft attention — NSE-optimised."""
     inputs = Input(shape=input_shape)
 
-    x = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4))(inputs)
-    x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
+    # Stem projection
+    x = Dense(256, kernel_regularizer=l2(1e-5))(inputs)
 
-    x = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
+    # Block 1
+    h1 = LSTM(256, return_sequences=True, kernel_regularizer=l2(1e-5))(x)
+    h1 = BatchNormalization()(h1)
+    h1 = Dropout(0.10)(h1)
+    x  = Add()([x, h1])   # residual
 
-    x = LSTM(64, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
+    # Block 2
+    h2 = LSTM(256, return_sequences=True, kernel_regularizer=l2(1e-5))(x)
+    h2 = BatchNormalization()(h2)
+    h2 = Dropout(0.10)(h2)
+    x  = Add()([x, h2])   # residual
 
-    x = LSTM(32, return_sequences=False, kernel_regularizer=l2(1e-4))(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.15)(x)
+    # Block 3 — compress
+    x  = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-5))(x)
+    x  = BatchNormalization()(x)
+    x  = Dropout(0.10)(x)
 
-    x = Dense(64, activation='relu', kernel_regularizer=l2(1e-4))(x)
-    x = Dense(32, activation='relu')(x)
+    # Soft attention pooling over time axis
+    attn = Dense(1, activation='softmax')(x)   # (batch, T, 1)
+    x    = Multiply()([x, attn])
+    x    = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)  # (batch, 128)
+
+    x = Dense(128, activation='relu', kernel_regularizer=l2(1e-5))(x)
+    x = Dropout(0.10)(x)
+    x = Dense(64,  activation='relu')(x)
     outputs = Dense(y_days, activation='linear')(x)
 
     model = Model(inputs=inputs, outputs=outputs, name='LSTM')
@@ -62,28 +73,37 @@ def build_lstm(input_shape, y_days):
 # 2. Deep Stacked GRU
 # ─────────────────────────────────────────────
 def build_gru(input_shape, y_days):
+    """Deep GRU with residual connections + soft attention — NSE-optimised."""
     inputs = Input(shape=input_shape)
 
-    x = GRU(128, return_sequences=True, kernel_regularizer=l2(1e-4),
-            recurrent_dropout=0.1)(inputs)
-    x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
+    # Stem projection
+    x = Dense(256, kernel_regularizer=l2(1e-5))(inputs)
 
-    x = GRU(128, return_sequences=True, kernel_regularizer=l2(1e-4),
-            recurrent_dropout=0.1)(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
+    # Block 1
+    h1 = GRU(256, return_sequences=True, kernel_regularizer=l2(1e-5))(x)
+    h1 = BatchNormalization()(h1)
+    h1 = Dropout(0.10)(h1)
+    x  = Add()([x, h1])
 
-    x = GRU(64, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
+    # Block 2
+    h2 = GRU(256, return_sequences=True, kernel_regularizer=l2(1e-5))(x)
+    h2 = BatchNormalization()(h2)
+    h2 = Dropout(0.10)(h2)
+    x  = Add()([x, h2])
 
-    x = GRU(32, return_sequences=False)(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.15)(x)
+    # Block 3 — compress
+    x  = GRU(128, return_sequences=True, kernel_regularizer=l2(1e-5))(x)
+    x  = BatchNormalization()(x)
+    x  = Dropout(0.10)(x)
 
-    x = Dense(64, activation='relu', kernel_regularizer=l2(1e-4))(x)
-    x = Dense(32, activation='relu')(x)
+    # Soft attention pooling
+    attn = Dense(1, activation='softmax')(x)
+    x    = Multiply()([x, attn])
+    x    = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)
+
+    x = Dense(128, activation='relu', kernel_regularizer=l2(1e-5))(x)
+    x = Dropout(0.10)(x)
+    x = Dense(64,  activation='relu')(x)
     outputs = Dense(y_days, activation='linear')(x)
 
     model = Model(inputs=inputs, outputs=outputs, name='GRU')
@@ -94,32 +114,32 @@ def build_gru(input_shape, y_days):
 # 3. Bidirectional LSTM with Attention
 # ─────────────────────────────────────────────
 def build_bilstm(input_shape, y_days):
+    """Bidirectional LSTM with increased capacity and soft attention."""
     inputs = Input(shape=input_shape)
 
+    x = Bidirectional(LSTM(128, return_sequences=True,
+                           kernel_regularizer=l2(1e-5)))(inputs)
+    x = BatchNormalization()(x)
+    x = Dropout(0.10)(x)
+
+    x = Bidirectional(LSTM(128, return_sequences=True,
+                           kernel_regularizer=l2(1e-5)))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.10)(x)
+
     x = Bidirectional(LSTM(64, return_sequences=True,
-                           kernel_regularizer=l2(1e-4)))(inputs)
+                           kernel_regularizer=l2(1e-5)))(x)
     x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.10)(x)
 
-    x = Bidirectional(LSTM(64, return_sequences=True,
-                           kernel_regularizer=l2(1e-4)))(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
+    # Soft attention pooling
+    attn_weights = Dense(1, activation='softmax')(x)
+    x = Multiply()([x, attn_weights])
+    x = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)
 
-    x = Bidirectional(LSTM(32, return_sequences=True,
-                           kernel_regularizer=l2(1e-4)))(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.2)(x)
-
-    # Soft attention pooling (pure Keras ops — no raw tf calls)
-    attn_weights = Dense(1, activation='softmax')(x)           # (batch, T, 1)
-    # Weighted context vector: sum(x * weights) over time axis
-    x = Multiply()([x, attn_weights])                         # (batch, T, features)
-    x = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)        # (batch, features)
-
-    x = Dense(64, activation='relu', kernel_regularizer=l2(1e-4))(x)
-    x = Dropout(0.15)(x)
-    x = Dense(32, activation='relu')(x)
+    x = Dense(128, activation='relu', kernel_regularizer=l2(1e-5))(x)
+    x = Dropout(0.10)(x)
+    x = Dense(64, activation='relu')(x)
     outputs = Dense(y_days, activation='linear')(x)
 
     model = Model(inputs=inputs, outputs=outputs, name='Bi-LSTM')

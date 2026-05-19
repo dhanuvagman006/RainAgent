@@ -22,39 +22,36 @@ FORCE_RETRAIN = True   # delete old .keras checkpoints and retrain from scratch
 # Each model gets its own tuned lr, batch_size, epochs, patience, etc.
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_CONFIGS = {
-    # Recurrent models — moderate LR, medium batch
+    # Recurrent models — tuned for maximum NSE
     "LSTM": dict(
-        lr=2e-4, lr_min=1e-7, batch_size=128, epochs=300,
-        patience_es=35, patience_lr=12, lr_factor=0.40,
-        cosine_t0=30, n_snapshots=7, n_tta=12, noise_std=0.003,
+        lr=1e-3, lr_min=1e-7, batch_size=64, epochs=500,
+        patience_es=60, patience_lr=20, lr_factor=0.50,
+        n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
     "GRU": dict(
-        lr=3e-4, lr_min=1e-7, batch_size=128, epochs=300,
-        patience_es=35, patience_lr=12, lr_factor=0.40,
-        cosine_t0=30, n_snapshots=7, n_tta=12, noise_std=0.003,
+        lr=1e-3, lr_min=1e-7, batch_size=64, epochs=500,
+        patience_es=60, patience_lr=20, lr_factor=0.50,
+        n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
-    # Bi-LSTM needs smaller batch for better gradient diversity
     "Bi-LSTM": dict(
-        lr=1e-4, lr_min=5e-8, batch_size=64, epochs=250,
-        patience_es=30, patience_lr=10, lr_factor=0.45,
-        cosine_t0=25, n_snapshots=7, n_tta=12, noise_std=0.004,
+        lr=5e-4, lr_min=5e-8, batch_size=64, epochs=400,
+        patience_es=50, patience_lr=18, lr_factor=0.50,
+        n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
-    # CNN is fast — bigger batch, higher LR
     "1D-CNN": dict(
-        lr=5e-4, lr_min=1e-7, batch_size=256, epochs=200,
-        patience_es=25, patience_lr=8,  lr_factor=0.35,
-        cosine_t0=20, n_snapshots=5, n_tta=10, noise_std=0.002,
+        lr=1e-3, lr_min=1e-7, batch_size=128, epochs=400,
+        patience_es=40, patience_lr=15, lr_factor=0.45,
+        n_snapshots=5, n_tta=12, noise_std=0.002,
     ),
     "CNN-LSTM": dict(
-        lr=2e-4, lr_min=1e-7, batch_size=128, epochs=300,
-        patience_es=35, patience_lr=12, lr_factor=0.40,
-        cosine_t0=30, n_snapshots=7, n_tta=12, noise_std=0.003,
+        lr=1e-3, lr_min=1e-7, batch_size=64, epochs=500,
+        patience_es=60, patience_lr=20, lr_factor=0.50,
+        n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
-    # Transformer — low LR, small batch, more epochs
     "Transformer": dict(
-        lr=8e-5, lr_min=5e-8, batch_size=64,  epochs=350,
-        patience_es=40, patience_lr=15, lr_factor=0.50,
-        cosine_t0=35, n_snapshots=7, n_tta=12, noise_std=0.002,
+        lr=3e-4, lr_min=5e-8, batch_size=64, epochs=500,
+        patience_es=60, patience_lr=20, lr_factor=0.50,
+        n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
 }
 _DEFAULT_CFG = MODEL_CONFIGS["LSTM"]   # fallback for any unregistered model name
@@ -100,14 +97,16 @@ def pbias(y_true, y_pred):
 # 3.  Loss functions
 # ─────────────────────────────────────────────────────────────────────────────
 def nse_loss(y_true, y_pred):
-    """Full-dataset NSE loss (stored for model serialisation)."""
+    """Batch-level 1-NSE loss (0 = perfect)."""
     res = tf.reduce_sum(tf.square(y_true - y_pred))
     den = tf.reduce_sum(tf.square(y_true - tf.reduce_mean(y_true))) + 1e-9
     return res / den
 
 def composite_loss(y_true, y_pred):
-    """Huber loss — smooth, robust to rainfall outliers, high NSE at eval."""
-    return tf.keras.losses.huber(y_true, y_pred, delta=1.0)
+    """0.5*MSE + 0.5*NSE_loss — directly maximises NSE while staying smooth."""
+    mse  = tf.reduce_mean(tf.square(y_true - y_pred))
+    nse_ = nse_loss(y_true, y_pred)
+    return 0.5 * mse + 0.5 * nse_
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -359,7 +358,6 @@ def train_models():
         PAT_ES      = cfg["patience_es"]
         PAT_LR      = cfg["patience_lr"]
         LR_FACTOR   = cfg["lr_factor"]
-        COSINE_T0   = cfg["cosine_t0"]
         N_SNAP      = cfg["n_snapshots"]
         N_TTA       = cfg["n_tta"]
         NOISE_STD   = cfg["noise_std"]
@@ -372,7 +370,7 @@ def train_models():
         print(f"\n{'═'*64}")
         print(f"  Model  : {name}")
         print(f"  lr={LR_BASE:.0e}  batch={BATCH_SIZE}  epochs={EPOCHS}"
-              f"  pat_es={PAT_ES}  pat_lr={PAT_LR}  T0={COSINE_T0}")
+              f"  pat_es={PAT_ES}  pat_lr={PAT_LR}")
         print(f"{'═'*64}")
 
         snap_cb    = SnapshotEnsembleCallback(MODELS_DIR, name, N_SNAP)
@@ -405,12 +403,9 @@ def train_models():
                 metrics=["mae"],
             )
 
-            # Cosine warm-restart LR (restarts every COSINE_T0 epochs)
-            def _cosine_lr(epoch, _lr,
-                           t0=COSINE_T0, base=LR_BASE, mn=LR_MIN):
-                cos = 0.5 * (1 + math.cos(math.pi * (epoch % t0) / t0))
-                return float(mn + (base - mn) * cos)
-
+            # NOTE: LearningRateScheduler removed — it conflicts with
+            # ReduceLROnPlateau and resets the LR every epoch, preventing
+            # convergence. ReduceLROnPlateau alone is the correct approach.
             callbacks = [
                 tf.keras.callbacks.EarlyStopping(
                     monitor="val_loss", patience=PAT_ES,
@@ -425,7 +420,6 @@ def train_models():
                     patience=PAT_LR, min_lr=LR_MIN,
                     verbose=1, min_delta=1e-6,
                 ),
-                tf.keras.callbacks.LearningRateScheduler(_cosine_lr, verbose=0),
                 tf.keras.callbacks.CSVLogger(csv_log, append=False),
                 tf.keras.callbacks.TensorBoard(
                     log_dir=tb_dir, histogram_freq=0,
