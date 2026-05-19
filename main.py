@@ -149,15 +149,25 @@ def predict_rainfall(request: PredictionRequest):
     # 3. Format Response
     dates = [(target_date + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(request.horizon)]
     
+    # Column order matches simulator.py's feature_cols list (23 features)
+    _sim_cols = [
+        'year', 'month', 'day',
+        'ps', 't2m', 't2m_max', 't2m_min', 'rh2m', 'ws2m', 'wd2m',
+        'allsky_sfc_sw_dwn',
+        'doy_sin', 'doy_cos', 'month_sin', 'month_cos', 'is_monsoon',
+        'rain_lag_1d', 'rain_lag_3d', 'rain_lag_7d',
+        'rain_roll7_mean', 'rain_roll30_mean', 'rain_roll7_std', 'wet_day_frac30',
+    ]
+    _ci = {c: i for i, c in enumerate(_sim_cols)}
     last_day_data = synthetic_data[59]
     weather_summary = {
-        "ps": round(float(last_day_data[3]), 2),
-        "t2m": round(float(last_day_data[4]), 2),
-        "t2m_max": round(float(last_day_data[5]), 2),
-        "t2m_min": round(float(last_day_data[6]), 2),
-        "rh2m": round(float(last_day_data[7]), 2),
-        "ws2m": round(float(last_day_data[8]), 2),
-        "allsky_sfc_sw_dwn": round(float(last_day_data[10]), 2),
+        "ps":                round(float(last_day_data[_ci['ps']]),                2),
+        "t2m":               round(float(last_day_data[_ci['t2m']]),               2),
+        "t2m_max":           round(float(last_day_data[_ci['t2m_max']]),           2),
+        "t2m_min":           round(float(last_day_data[_ci['t2m_min']]),           2),
+        "rh2m":              round(float(last_day_data[_ci['rh2m']]),              2),
+        "ws2m":              round(float(last_day_data[_ci['ws2m']]),              2),
+        "allsky_sfc_sw_dwn": round(float(last_day_data[_ci['allsky_sfc_sw_dwn']]), 2),
     }
 
     return PredictionResponse(
