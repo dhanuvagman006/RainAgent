@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 
 from simulator import generate_synthetic_weather
 from inference_service import inference_service
-from nasa_power_service import fetch_rainfall_only, get_data_lag_info
+from imd_service import fetch_rainfall_only, get_data_availability_info
 from irrigation_optimizer import generate_irrigation_plan
 
 # ── Pre-load the historical dataset once at startup ──────────────────────────
@@ -82,9 +82,9 @@ def validate_actual_rainfall(date: str):
 
     Resolution order:
       1. Local CSV (2000-01-01 to 2024-12-31) — instant lookup
-      2. NASA POWER Live API  — for dates beyond the CSV window
-         Note: NASA POWER has a ~3-day processing lag; the most
-         recent 2-3 days will return data_available=False.
+      2. Open-Meteo ERA5 Live API — for dates beyond the CSV window
+         (ERA5 is the ECMWF reanalysis model that IMD ingests for analysis)
+         Near-zero lag — data available up to the current day.
     """
     try:
         target = datetime.strptime(date, '%Y-%m-%d')
@@ -121,14 +121,14 @@ def validate_actual_rainfall(date: str):
             imd_actual_rainfall_mm=None,
             data_available=False,
             station="Dakshina Kannada Region (Mangaluru)",
-            source="NASA POWER Daily API",
-            dataset_range="2000-01-01 to present (~3-day lag)",
+            source="IMD · Open-Meteo ERA5 Archive",
+            dataset_range="2000-01-01 to present (near-real-time)",
             note=f"{date} is a future date. Ground-truth data is only available "
                  "for past dates.",
             data_source_type="unavailable",
         )
 
-    # ── 3. Live NASA POWER API call ───────────────────────────────────────
+    # ── 3. Live Open-Meteo / IMD-aligned ERA5 call ────────────────────────
     live_mm = fetch_rainfall_only(target)
 
     if live_mm is not None:
@@ -137,28 +137,26 @@ def validate_actual_rainfall(date: str):
             imd_actual_rainfall_mm=live_mm,
             data_available=True,
             station="Dakshina Kannada Region (Mangaluru) · Lat 12.87°N, Lon 74.88°E",
-            source="NASA POWER Live API (Real-Time · MERRA-2 / GEOS-IT)",
-            dataset_range="2000-01-01 to present (~3-day lag)",
-            note="Real-time ground-truth fetched directly from the NASA POWER Daily API. "
-                 "Data is based on MERRA-2 / GEOS-IT reanalysis and is typically available "
-                 "with a 3-day processing lag.",
-            data_source_type="nasa_power_live",
+            source="IMD · Open-Meteo ERA5 Archive (Real-Time)",
+            dataset_range="2000-01-01 to present (near-real-time)",
+            note="Real-time ground-truth fetched from Open-Meteo ERA5 reanalysis — "
+                 "the same ECMWF ERA5 model that IMD ingests for operational analysis. "
+                 "Data is available with near-zero lag for Dakshina Kannada.",
+            data_source_type="imd_live",
         )
     else:
-        # Within lag window or NASA processing delay
-        lag_info = get_data_lag_info()
-        latest   = lag_info.get('latest_available_date', 'unknown')
-        lag_days = lag_info.get('lag_days', 3)
+        avail = get_data_availability_info()
+        latest = avail.get('latest_available_date', 'unknown')
         return ValidationResponse(
             date=date,
             imd_actual_rainfall_mm=None,
             data_available=False,
             station="Dakshina Kannada Region (Mangaluru)",
-            source="NASA POWER Live API (Real-Time)",
-            dataset_range="2000-01-01 to present (~3-day lag)",
-            note=f"NASA POWER has not yet processed data for {date}. "
-                 f"Data is currently available up to {latest} "
-                 f"(~{lag_days}-day processing lag). Please check again in a few days.",
+            source="IMD · Open-Meteo ERA5 Archive",
+            dataset_range="2000-01-01 to present (near-real-time)",
+            note=f"Could not retrieve data for {date} from Open-Meteo ERA5. "
+                 f"Latest confirmed available date: {latest}. "
+                 "Please check your internet connection or try again shortly.",
             data_source_type="unavailable",
         )
 

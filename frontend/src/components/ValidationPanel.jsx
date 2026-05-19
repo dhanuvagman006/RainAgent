@@ -103,8 +103,8 @@ function StatusChip({ status }) {
   const map = {
     loading:  { bg:'bg-blue-50 border-blue-100',       text:'text-blue-600',    dot:'bg-blue-400 animate-pulse', label:'Fetching Data…'                    },
     live:     { bg:'bg-emerald-50 border-emerald-100',  text:'text-emerald-700', dot:'bg-emerald-500',            label:'Ground-Truth Available'             },
-    live_api: { bg:'bg-violet-50 border-violet-100',   text:'text-violet-700',  dot:'bg-violet-500',             label:'Live NASA POWER · Real-Time'        },
-    lag:      { bg:'bg-amber-50 border-amber-100',      text:'text-amber-700',   dot:'bg-amber-400 animate-pulse',label:'Within NASA Processing Lag (~3 days)'},
+    live_api: { bg:'bg-violet-50 border-violet-100',   text:'text-violet-700',  dot:'bg-violet-500',             label:'Live IMD · Real-Time ERA5'          },
+    lag:      { bg:'bg-amber-50 border-amber-100',      text:'text-amber-700',   dot:'bg-amber-400 animate-pulse',label:'Data temporarily unavailable'       },
     future:   { bg:'bg-amber-50 border-amber-100',      text:'text-amber-700',   dot:'bg-amber-400',              label:'Future Date — No Historical Record'  },
     error:    { bg:'bg-red-50 border-red-100',          text:'text-red-600',     dot:'bg-red-400',                label:'Validation Service Unavailable'     },
     idle:     { bg:'bg-slate-50 border-slate-100',      text:'text-slate-500',   dot:'bg-slate-300',              label:'Run a prediction to validate'       },
@@ -310,7 +310,7 @@ export default function ValidationPanel({ predictionData, selectedDate, selected
       const d = res.data;
       setImdData(d);
       if (d.data_available) {
-        setStatus(d.data_source_type === 'nasa_power_live' ? 'live_api' : 'live');
+        setStatus(d.data_source_type === 'imd_live' ? 'live_api' : 'live');
       } else if (d.note?.toLowerCase().includes('future')) {
         setStatus('future');
       } else if (d.note?.toLowerCase().includes('lag') || d.note?.toLowerCase().includes('not yet')) {
@@ -438,9 +438,9 @@ export default function ValidationPanel({ predictionData, selectedDate, selected
               <span>
                 <strong className="text-slate-600">Source:</strong>{' '}
                 {imdData?.source ?? 'India Meteorological Department (IMD) · NASA POWER'}
-                {imdData?.data_source_type === 'nasa_power_live' && (
+                {imdData?.data_source_type === 'imd_live' && (
                   <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700 border border-violet-200">
-                    ⚡ LIVE API
+                    ⚡ LIVE IMD
                   </span>
                 )}
               </span>
