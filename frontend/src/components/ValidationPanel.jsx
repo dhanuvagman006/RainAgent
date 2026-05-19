@@ -101,11 +101,13 @@ function CenterDivider({ delta, isLoading }) {
 ───────────────────────────────────────────── */
 function StatusChip({ status }) {
   const map = {
-    loading: { bg:'bg-blue-50 border-blue-100',       text:'text-blue-600',    dot:'bg-blue-400 animate-pulse', label:'Fetching IMD Data…'             },
-    live:    { bg:'bg-emerald-50 border-emerald-100',  text:'text-emerald-700', dot:'bg-emerald-500',            label:'Live Ground-Truth Available'     },
-    future:  { bg:'bg-amber-50 border-amber-100',      text:'text-amber-700',   dot:'bg-amber-400',              label:'Future Date — No Historical Record'},
-    error:   { bg:'bg-red-50 border-red-100',          text:'text-red-600',     dot:'bg-red-400',                label:'Validation Service Unavailable'  },
-    idle:    { bg:'bg-slate-50 border-slate-100',      text:'text-slate-500',   dot:'bg-slate-300',              label:'Run a prediction to validate'    },
+    loading:  { bg:'bg-blue-50 border-blue-100',       text:'text-blue-600',    dot:'bg-blue-400 animate-pulse', label:'Fetching Data…'                    },
+    live:     { bg:'bg-emerald-50 border-emerald-100',  text:'text-emerald-700', dot:'bg-emerald-500',            label:'Ground-Truth Available'             },
+    live_api: { bg:'bg-violet-50 border-violet-100',   text:'text-violet-700',  dot:'bg-violet-500',             label:'Live NASA POWER · Real-Time'        },
+    lag:      { bg:'bg-amber-50 border-amber-100',      text:'text-amber-700',   dot:'bg-amber-400 animate-pulse',label:'Within NASA Processing Lag (~3 days)'},
+    future:   { bg:'bg-amber-50 border-amber-100',      text:'text-amber-700',   dot:'bg-amber-400',              label:'Future Date — No Historical Record'  },
+    error:    { bg:'bg-red-50 border-red-100',          text:'text-red-600',     dot:'bg-red-400',                label:'Validation Service Unavailable'     },
+    idle:     { bg:'bg-slate-50 border-slate-100',      text:'text-slate-500',   dot:'bg-slate-300',              label:'Run a prediction to validate'       },
   };
   const s = map[status] ?? map.idle;
   return (
@@ -305,8 +307,17 @@ export default function ValidationPanel({ predictionData, selectedDate, selected
     setImdData(null);
     try {
       const res = await axios.get(`${API_BASE}/validate-actual-rainfall`, { params: { date } });
-      setImdData(res.data);
-      setStatus(res.data.data_available ? 'live' : 'future');
+      const d = res.data;
+      setImdData(d);
+      if (d.data_available) {
+        setStatus(d.data_source_type === 'nasa_power_live' ? 'live_api' : 'live');
+      } else if (d.note?.toLowerCase().includes('future')) {
+        setStatus('future');
+      } else if (d.note?.toLowerCase().includes('lag') || d.note?.toLowerCase().includes('not yet')) {
+        setStatus('lag');
+      } else {
+        setStatus('future');
+      }
       setFetchedAt(new Date().toLocaleTimeString('en-IN', {
         hour: '2-digit', minute: '2-digit', second: '2-digit'
       }));
@@ -377,6 +388,18 @@ export default function ValidationPanel({ predictionData, selectedDate, selected
                 <p className="text-xs text-slate-400 mt-0.5">Check that the backend API is running</p>
               </div>
             </div>
+          ) : status === 'lag' ? (
+            <div className="flex-1 flex flex-col items-center justify-center px-4 py-8 text-center gap-3">
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                <Clock className="w-6 h-6 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-600">Data not yet processed</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  NASA POWER has a ~3-day processing lag.{selectedDate && ` (${selectedDate})`}
+                </p>
+              </div>
+            </div>
           ) : status === 'future' ? (
             <div className="flex-1 flex flex-col items-center justify-center px-4 py-8 text-center gap-3">
               <div className="p-3 rounded-xl bg-amber-50 border border-amber-100">
@@ -385,7 +408,7 @@ export default function ValidationPanel({ predictionData, selectedDate, selected
               <div>
                 <p className="text-sm font-semibold text-slate-600">Future date selected</p>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Ground-truth available for dates within 2000–2024.{selectedDate && ` (${selectedDate})`}
+                  Ground-truth is only available for past dates.{selectedDate && ` (${selectedDate})`}
                 </p>
               </div>
             </div>
@@ -399,7 +422,7 @@ export default function ValidationPanel({ predictionData, selectedDate, selected
         </div>
 
         {/* Best-Model Finder — only shown when IMD data is live */}
-        {status === 'live' && imdValue !== null && (
+        {(status === 'live' || status === 'live_api') && imdValue !== null && (
           <BestModelFinder
             imdValue={imdValue}
             selectedDate={selectedDate}
@@ -413,8 +436,13 @@ export default function ValidationPanel({ predictionData, selectedDate, selected
             <span className="flex items-center gap-1.5">
               <Database className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
               <span>
-                <strong className="text-slate-600">Official Data Source:</strong>{' '}
+                <strong className="text-slate-600">Source:</strong>{' '}
                 {imdData?.source ?? 'India Meteorological Department (IMD) · NASA POWER'}
+                {imdData?.data_source_type === 'nasa_power_live' && (
+                  <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700 border border-violet-200">
+                    ⚡ LIVE API
+                  </span>
+                )}
               </span>
             </span>
             <span className="flex items-center gap-1.5">

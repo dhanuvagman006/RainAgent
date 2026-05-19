@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 
 from simulator import generate_synthetic_weather
 from inference_service import inference_service
+from nasa_power_service import fetch_rainfall_only, get_data_lag_info
 from irrigation_optimizer import generate_irrigation_plan
 
 # ── Pre-load the historical dataset once at startup ──────────────────────────
@@ -72,52 +73,94 @@ class ValidationResponse(BaseModel):
     source:                 str
     dataset_range:          str
     note:                   str
+    data_source_type:       str   # 'local_csv' | 'nasa_power_live' | 'unavailable'
 
 @app.get("/validate-actual-rainfall", response_model=ValidationResponse)
 def validate_actual_rainfall(date: str):
     """
-    Looks up the historically observed rainfall for a given date from the
-    NASA POWER / IMD-aligned Dakshina Kannada dataset (2000-2024).
-    Returns the actual prectotcorr value as ground-truth.
+    Returns the observed rainfall for a given date.
+
+    Resolution order:
+      1. Local CSV (2000-01-01 to 2024-12-31) — instant lookup
+      2. NASA POWER Live API  — for dates beyond the CSV window
+         Note: NASA POWER has a ~3-day processing lag; the most
+         recent 2-3 days will return data_available=False.
     """
     try:
         target = datetime.strptime(date, '%Y-%m-%d')
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
 
-    if _HISTORICAL_DF is None:
-        raise HTTPException(status_code=503, detail="Historical dataset not available.")
+    now = datetime.utcnow()
 
-    # Filter to the requested date
-    row = _HISTORICAL_DF[
-        (_HISTORICAL_DF['year']  == target.year) &
-        (_HISTORICAL_DF['month'] == target.month) &
-        (_HISTORICAL_DF['day']   == target.day)
-    ]
+    # ── 1. Fast path: check local CSV ─────────────────────────────────────
+    if _HISTORICAL_DF is not None:
+        row = _HISTORICAL_DF[
+            (_HISTORICAL_DF['year']  == target.year) &
+            (_HISTORICAL_DF['month'] == target.month) &
+            (_HISTORICAL_DF['day']   == target.day)
+        ]
+        if not row.empty:
+            actual_mm = round(float(row['prectotcorr'].iloc[0]), 2)
+            return ValidationResponse(
+                date=date,
+                imd_actual_rainfall_mm=actual_mm,
+                data_available=True,
+                station="Dakshina Kannada Region (Mangaluru)",
+                source="India Meteorological Department (IMD) · NASA POWER (Local Cache)",
+                dataset_range="2000-01-01 to 2024-12-31",
+                note="Ground-truth daily rainfall from the local NASA POWER / IMD-aligned "
+                     "dataset for Dakshina Kannada, Karnataka.",
+                data_source_type="local_csv",
+            )
 
-    if row.empty:
+    # ── 2. Reject strict future dates (beyond today UTC) ──────────────────
+    if target.date() > now.date():
         return ValidationResponse(
             date=date,
             imd_actual_rainfall_mm=None,
             data_available=False,
             station="Dakshina Kannada Region (Mangaluru)",
-            source="India Meteorological Department (IMD) · NASA POWER",
-            dataset_range="2000-01-01 to 2024-12-31",
-            note="Date is outside the available observation window (2000–2024). "
-                 "Future dates have no ground-truth record yet.",
+            source="NASA POWER Daily API",
+            dataset_range="2000-01-01 to present (~3-day lag)",
+            note=f"{date} is a future date. Ground-truth data is only available "
+                 "for past dates.",
+            data_source_type="unavailable",
         )
 
-    actual_mm = round(float(row['prectotcorr'].iloc[0]), 2)
-    return ValidationResponse(
-        date=date,
-        imd_actual_rainfall_mm=actual_mm,
-        data_available=True,
-        station="Dakshina Kannada Region (Mangaluru)",
-        source="India Meteorological Department (IMD) · NASA POWER",
-        dataset_range="2000-01-01 to 2024-12-31",
-        note="Ground-truth daily rainfall from the NASA POWER / IMD station network "
-             "co-located at Dakshina Kannada, Karnataka.",
-    )
+    # ── 3. Live NASA POWER API call ───────────────────────────────────────
+    live_mm = fetch_rainfall_only(target)
+
+    if live_mm is not None:
+        return ValidationResponse(
+            date=date,
+            imd_actual_rainfall_mm=live_mm,
+            data_available=True,
+            station="Dakshina Kannada Region (Mangaluru) · Lat 12.87°N, Lon 74.88°E",
+            source="NASA POWER Live API (Real-Time · MERRA-2 / GEOS-IT)",
+            dataset_range="2000-01-01 to present (~3-day lag)",
+            note="Real-time ground-truth fetched directly from the NASA POWER Daily API. "
+                 "Data is based on MERRA-2 / GEOS-IT reanalysis and is typically available "
+                 "with a 3-day processing lag.",
+            data_source_type="nasa_power_live",
+        )
+    else:
+        # Within lag window or NASA processing delay
+        lag_info = get_data_lag_info()
+        latest   = lag_info.get('latest_available_date', 'unknown')
+        lag_days = lag_info.get('lag_days', 3)
+        return ValidationResponse(
+            date=date,
+            imd_actual_rainfall_mm=None,
+            data_available=False,
+            station="Dakshina Kannada Region (Mangaluru)",
+            source="NASA POWER Live API (Real-Time)",
+            dataset_range="2000-01-01 to present (~3-day lag)",
+            note=f"NASA POWER has not yet processed data for {date}. "
+                 f"Data is currently available up to {latest} "
+                 f"(~{lag_days}-day processing lag). Please check again in a few days.",
+            data_source_type="unavailable",
+        )
 
 @app.post("/predict", response_model=PredictionResponse)
 def predict_rainfall(request: PredictionRequest):
