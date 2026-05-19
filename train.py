@@ -38,11 +38,15 @@ def _configure_hardware():
     using_gpu = len(gpus) > 0
 
     if using_gpu:
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
+        # NOTE: Do NOT call set_memory_growth — it prevents TF from
+        # pre-allocating the full VRAM slab, which kills GPU throughput.
+        # Colab T4/A100 have enough VRAM for this dataset.
         tf.keras.mixed_precision.set_global_policy('mixed_float16')
         strategy = tf.distribute.MirroredStrategy()
         print(f"[HW] {len(gpus)} GPU(s) — MirroredStrategy + mixed_float16")
+        for g in gpus:
+            details = tf.config.experimental.get_device_details(g)
+            print(f"     └─ {details.get('device_name', g.name)}")
     else:
         tf.keras.mixed_precision.set_global_policy('float32')
         strategy = tf.distribute.OneDeviceStrategy(device='/cpu:0')
@@ -300,19 +304,34 @@ class RichProgressCallback(tf.keras.callbacks.Callback):
 # 9.  tf.data pipeline
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_datasets(X_train, y_train, X_test, y_test, batch_size):
+def _build_datasets(X_train, y_train, X_test, y_test, batch_size, using_gpu=False):
     AUTOTUNE = tf.data.AUTOTUNE
+
+    # Cast to float16 when using GPU so the data pipeline feeds the GPU
+    # directly in the right dtype — avoids silent upcasting every batch.
+    dtype = tf.float16 if using_gpu else tf.float32
+
+    def cast(x, y):
+        return tf.cast(x, dtype), tf.cast(y, tf.float32)  # labels stay float32
+
     train_ds = (
-        tf.data.Dataset.from_tensor_slices((X_train, y_train))
-        .cache()
-        .shuffle(buffer_size=len(X_train), seed=42, reshuffle_each_iteration=True)
+        tf.data.Dataset.from_tensor_slices(
+            (X_train.astype('float32'), y_train.astype('float32'))
+        )
+        .cache()                              # cache raw tensors in RAM once
+        .shuffle(buffer_size=2048, seed=42,   # smaller buffer = less CPU stall
+                 reshuffle_each_iteration=True)
         .batch(batch_size, drop_remainder=True)
-        .prefetch(AUTOTUNE)
+        .map(cast, num_parallel_calls=AUTOTUNE)
+        .prefetch(AUTOTUNE)                   # overlap GPU compute + CPU batch prep
     )
     val_ds = (
-        tf.data.Dataset.from_tensor_slices((X_test, y_test))
+        tf.data.Dataset.from_tensor_slices(
+            (X_test.astype('float32'), y_test.astype('float32'))
+        )
         .cache()
         .batch(batch_size)
+        .map(cast, num_parallel_calls=AUTOTUNE)
         .prefetch(AUTOTUNE)
     )
     return train_ds, val_ds
@@ -344,10 +363,12 @@ def train_models():
     Y_DAYS       = 1
     EPOCHS       = 200      # generous budget; EarlyStopping exits early
     N_REPLICAS   = strategy.num_replicas_in_sync
-    BATCH_SIZE   = 128 * N_REPLICAS
+    # GPU (Colab T4/A100) benefits from large batches to saturate CUDA cores.
+    # CPU is memory-bound so keep it at 128.
+    BATCH_SIZE   = (512 if using_gpu else 128) * N_REPLICAS
     PATIENCE_ES  = 20       # give model time to escape plateau
     PATIENCE_LR  = 8        # ReduceLROnPlateau
-    LR_BASE      = 3e-4     # slightly lower → smoother convergence
+    LR_BASE      = 3e-4 * (BATCH_SIZE / 128) ** 0.5  # linear LR scaling rule
     LR_MIN       = 1e-6
     N_SNAPSHOTS  = 5        # ensemble size
     N_TTA        = 7        # test-time augmentation passes
@@ -371,7 +392,7 @@ def train_models():
     y_test_mm   = inverse_transform_target(y_test, target_scaler).flatten()
 
     train_ds, val_ds = _build_datasets(
-        X_train, y_train, X_test, y_test, BATCH_SIZE
+        X_train, y_train, X_test, y_test, BATCH_SIZE, using_gpu=using_gpu
     )
 
     # Load existing metrics so a partial run doesn't lose earlier results
