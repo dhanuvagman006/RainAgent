@@ -38,12 +38,13 @@ def _configure_hardware():
     using_gpu = len(gpus) > 0
 
     if using_gpu:
-        # NOTE: Do NOT call set_memory_growth — it prevents TF from
-        # pre-allocating the full VRAM slab, which kills GPU throughput.
-        # Colab T4/A100 have enough VRAM for this dataset.
+        # NOTE: Do NOT use MirroredStrategy on a single GPU — it wraps the
+        # optimizer with LossScaleOptimizer which calls merge_call() inside
+        # tf.function, causing a RuntimeError with mixed_float16.
+        # OneDeviceStrategy is correct for single-GPU Colab (T4/L4/A100).
         tf.keras.mixed_precision.set_global_policy('mixed_float16')
-        strategy = tf.distribute.MirroredStrategy()
-        print(f"[HW] {len(gpus)} GPU(s) — MirroredStrategy + mixed_float16")
+        strategy = tf.distribute.OneDeviceStrategy(device='/gpu:0')
+        print(f"[HW] {len(gpus)} GPU(s) — OneDeviceStrategy + mixed_float16")
         for g in gpus:
             details = tf.config.experimental.get_device_details(g)
             print(f"     └─ {details.get('device_name', g.name)}")
@@ -80,7 +81,7 @@ def pbias(y_true, y_pred):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def nse_loss(y_true, y_pred):
-    """Pure NSE loss (1 - NSE)."""
+    """Pure NSE loss (1 - NSE). Use only on full dataset, not mini-batches."""
     residuals   = tf.reduce_sum(tf.square(y_true - y_pred))
     mean_obs    = tf.reduce_mean(y_true)
     denominator = tf.reduce_sum(tf.square(y_true - mean_obs)) + 1e-9
@@ -89,13 +90,18 @@ def nse_loss(y_true, y_pred):
 
 def composite_loss(y_true, y_pred):
     """
-    0.7 * NSE_loss + 0.3 * MSE
-    - NSE loss: makes the model directly optimise what we measure
-    - MSE component: keeps gradients stable when denominator is small
+    Huber loss (delta=1.0) as the training objective.
+
+    Why NOT batch-level NSE loss:
+      NSE = 1 - SS_res/SS_tot, where SS_tot uses mean(y_true).
+      At batch_size=256, mean(y_true) fluctuates wildly per batch,
+      making the NSE gradient very noisy → model stuck at NSE ≈ 0.40.
+
+    Huber loss is smooth, robust to rainfall outliers (unlike pure MSE),
+    and empirically produces high NSE at evaluation time because it
+    minimises squared error for small residuals and linear for large ones.
     """
-    nse_component = nse_loss(y_true, y_pred)
-    mse_component = tf.reduce_mean(tf.square(y_true - y_pred))
-    return 0.7 * nse_component + 0.3 * mse_component
+    return tf.keras.losses.huber(y_true, y_pred, delta=1.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
