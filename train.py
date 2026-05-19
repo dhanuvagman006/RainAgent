@@ -359,21 +359,24 @@ def train_models():
     os.makedirs(LOG_DIR,    exist_ok=True)
 
     # ── Hyper-parameters ───────────────────────────────────────────────────
+    # ── Hyper-parameters ───────────────────────────────────────────────────
     X_DAYS       = 60
     Y_DAYS       = 1
     EPOCHS       = 200      # generous budget; EarlyStopping exits early
     N_REPLICAS   = strategy.num_replicas_in_sync
-    # GPU (Colab L4/A100/T4) benefits from very large batches to saturate CUDA cores.
-    # 15 GB VRAM → batch 2048 uses ~4 GB, leaving headroom for activations.
-    # CPU is memory-bound so keep it at 128.
-    BATCH_SIZE   = (2048 if using_gpu else 128) * N_REPLICAS
+    # Dataset has only ~7,257 training samples. Batch must be small enough
+    # to give many gradient updates per epoch (target: ≥ 30 steps/epoch).
+    # batch=256 → 28 steps/epoch on GPU (good). batch=128 on CPU.
+    # DO NOT scale beyond 512 or NSE collapses (only 3 steps/epoch at 2048).
+    BATCH_SIZE   = (256 if using_gpu else 128) * N_REPLICAS
     PATIENCE_ES  = 20       # give model time to escape plateau
     PATIENCE_LR  = 8        # ReduceLROnPlateau
-    LR_BASE      = 3e-4 * (BATCH_SIZE / 128) ** 0.5  # linear LR scaling rule
+    LR_BASE      = 3e-4     # flat base LR — no scaling needed at batch=256
     LR_MIN       = 1e-6
     N_SNAPSHOTS  = 5        # ensemble size
     N_TTA        = 7        # test-time augmentation passes
 
+    steps_per_epoch = len(X_train) // BATCH_SIZE if 'X_train' in dir() else '?'
     print(f"[CFG] Replicas={N_REPLICAS}  Batch={BATCH_SIZE}  Cores={num_cores}")
 
     # ── Data ───────────────────────────────────────────────────────────────
@@ -447,8 +450,8 @@ def train_models():
                     optimizer=optimizer,
                     loss=composite_loss,    # ← DIRECTLY OPTIMISE NSE
                     metrics=['mae'],
-                    # XLA fuses LSTM/GRU ops into one GPU kernel → 2-4× faster
-                    jit_compile=using_gpu,
+                    # jit_compile disabled: XLA at batch=256 on 7k samples
+                    # gives no throughput gain and can cause numeric drift.
                 )
 
             model.summary(print_fn=lambda s: None)
