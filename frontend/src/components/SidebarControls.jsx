@@ -56,7 +56,7 @@ export default function SidebarControls({ formData, setFormData, onSubmit, isLoa
             onChange={handleChange}
             className={inputClass + " cursor-pointer"}
           >
-            {["LSTM", "GRU", "Bi-LSTM", "1D-CNN", "CNN-LSTM", "Transformer", "Ensemble"].map(m => (
+            {["LSTM", "GRU", "Bi-LSTM", "1D-CNN", "CNN-LSTM", "Transformer"].map(m => (
               <option key={m} value={m}>{m}</option>
             ))}
           </select>

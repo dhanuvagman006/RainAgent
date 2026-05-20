@@ -2,7 +2,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
   BarChart, Bar, Cell
 } from 'recharts';
-import { Info, TrendingDown } from 'lucide-react';
+import { Info, TrendingUp } from 'lucide-react';
 
 // Shared chart styling constants (light theme)
 const CHART_GRID_COLOR = '#f1f5f9';    // slate-100
@@ -29,22 +29,48 @@ export default function AnalyticsView({ metricsData, selectedModel, weatherSumma
 
   const epochData = [];
   if (history.loss && history.val_loss) {
-    for (let i = 0; i < history.loss.length; i++) {
-      epochData.push({ epoch: i + 1, loss: history.loss[i], val_loss: history.val_loss[i] });
+    // Find the "settled" loss — median of last 20% of epochs
+    const allLoss = history.loss;
+    const tail = allLoss.slice(Math.floor(allLoss.length * 0.8));
+    const sortedTail = [...tail].sort((a, b) => a - b);
+    const medianTail = sortedTail[Math.floor(sortedTail.length / 2)];
+    // Only include epochs whose loss is ≤ 15× the settled value
+    // This clips the huge MSE spike at epoch 1 and shows the convergence curve
+    const clipThreshold = medianTail * 15;
+
+    for (let i = 0; i < allLoss.length; i++) {
+      if (allLoss[i] <= clipThreshold) {
+        epochData.push({
+          epoch: i + 1,
+          loss: allLoss[i],
+          val_loss: history.val_loss[i],
+        });
+      }
     }
   }
 
-  const comparisonData = Object.keys(metricsData).map(modelName => ({
-    name: modelName,
-    nse:  metricsData[modelName].final_metrics.nse,
-    rmse: metricsData[modelName].final_metrics.rmse,
-    mae:  metricsData[modelName].final_metrics.mae,
-  }));
+  const comparisonData = Object.keys(metricsData)
+    .filter(m => m !== 'Ensemble')
+    .map(modelName => ({
+      name: modelName,
+      nse:  metricsData[modelName].final_metrics.nse,
+      rmse: metricsData[modelName].final_metrics.rmse,
+      mae:  metricsData[modelName].final_metrics.mae,
+    }));
 
-  const minRmseModel = comparisonData.reduce(
-    (prev, cur) => (prev.rmse < cur.rmse ? prev : cur),
-    { rmse: 999 }
+  // Best = highest NSE (Nash–Sutcliffe Efficiency, higher is better)
+  const maxNseModel = comparisonData.reduce(
+    (prev, cur) => (cur.nse > prev.nse ? cur : prev),
+    { nse: -Infinity }
   );
+
+  // Y-axis domain: tight window around actual NSE values so deviations are visible
+  const nseValues = comparisonData.map(d => d.nse);
+  const nseMin = Math.max(0, Math.min(...nseValues) - 0.03);
+  const nseMax = Math.min(1, Math.max(...nseValues) + 0.01);
+  // Round down to nearest 0.01 for clean ticks
+  const nseDomainMin = Math.floor(nseMin * 100) / 100;
+  const nseDomainMax = Math.ceil(nseMax  * 100) / 100;
 
   const season = weatherSummary?.t2m_max > 32
     ? 'Summer' : weatherSummary?.rh2m > 75
@@ -75,7 +101,8 @@ export default function AnalyticsView({ metricsData, selectedModel, weatherSumma
               <YAxis
                 stroke={CHART_AXIS_COLOR}
                 tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
-                tickFormatter={v => v.toFixed(3)}
+                tickFormatter={v => v < 1 ? v.toFixed(3) : v.toFixed(2)}
+                domain={['auto', 'auto']}
               />
               <RechartsTooltip
                 contentStyle={TOOLTIP_STYLE}
@@ -102,16 +129,16 @@ export default function AnalyticsView({ metricsData, selectedModel, weatherSumma
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-base font-semibold text-slate-800">Cross-Model Evaluation</h3>
-              <p className="text-xs text-slate-500 mt-0.5">RMSE (lower is better)</p>
+              <p className="text-xs text-slate-500 mt-0.5">NSE (higher is better · 1.0 = perfect)</p>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2 py-1">
-              <TrendingDown className="w-3.5 h-3.5 text-emerald-600" />
-              Best: {minRmseModel.name}
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
+              Best: {maxNseModel.name}
             </div>
           </div>
           <div className="h-44">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={comparisonData} margin={{ top: 5, right: 16, left: -10, bottom: 5 }}>
+              <BarChart data={comparisonData} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} vertical={false} />
                 <XAxis
                   dataKey="name"
@@ -122,17 +149,18 @@ export default function AnalyticsView({ metricsData, selectedModel, weatherSumma
                   stroke={CHART_AXIS_COLOR}
                   tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
                   tickFormatter={v => v.toFixed(3)}
+                  domain={[nseDomainMin, nseDomainMax]}
                 />
                 <RechartsTooltip
                   cursor={{ fill: CURSOR_FILL }}
                   contentStyle={TOOLTIP_STYLE}
-                  formatter={(value) => [value.toFixed(4) + ' mm', 'RMSE']}
+                  formatter={(value) => [value.toFixed(4), 'NSE']}
                 />
-                <Bar dataKey="rmse" radius={[5, 5, 0, 0]}>
+                <Bar dataKey="nse" radius={[5, 5, 0, 0]}>
                   {comparisonData.map((entry, index) => (
                     <Cell
                       key={`cell-${index}`}
-                      fill={entry.name === minRmseModel.name ? '#059669' : '#93c5fd'}
+                      fill={entry.name === maxNseModel.name ? '#059669' : '#93c5fd'}
                     />
                   ))}
                 </Bar>
