@@ -58,6 +58,7 @@ class InferenceService:
                         model_path,
                         compile=False,
                         custom_objects=_CUSTOM_OBJECTS,
+                        safe_mode=False
                     )
                 else:
                     print(f"Warning: {model_path} not found.")
