@@ -9,6 +9,9 @@ def setup_visuals(save_dir='frontend/public/plots/'):
     return save_dir
 
 def plot_loss_curve(history, model_name, save_dir):
+    if not history or 'loss' not in history or 'val_loss' not in history:
+        print(f"  [VIS] Skipping loss curve for {model_name} (missing history data)")
+        return
     plt.figure(figsize=(10, 6))
     plt.plot(history['loss'], label='Training Loss', color='blue', linewidth=2)
     plt.plot(history['val_loss'], label='Validation Loss', color='green', linewidth=2)

@@ -378,6 +378,7 @@ def train_models():
                     model_path,
                     custom_objects={"nse_loss": nse_loss,
                                     "composite_loss": composite_loss},
+                    safe_mode=False,
                 )
                 skip_train = True
             except Exception as e:
@@ -443,6 +444,8 @@ def train_models():
                             if k == "epoch": continue
                             hist_dict.setdefault(k, []).append(
                                 float(v) if v else float("nan"))
+            elif name in all_metrics and "history" in all_metrics[name]:
+                hist_dict = all_metrics[name]["history"]
             print("  [CKPT] Skipped training — evaluating checkpoint.")
 
         # ── Predict: snapshot ensemble + TTA ─────────────────────────────
