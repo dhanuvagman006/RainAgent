@@ -1,4 +1,3 @@
-import React from 'react';
 import { Droplets, Activity, Database } from 'lucide-react';
 
 export default function KPIDashboard({ predictionData, finalTankStatus }) {

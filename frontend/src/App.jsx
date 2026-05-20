@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import SidebarControls from './components/SidebarControls';
 import KPIDashboard from './components/KPIDashboard';
