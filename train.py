@@ -17,39 +17,35 @@ from sklearn.preprocessing import MinMaxScaler
 # ─────────────────────────────────────────────────────────────────────────────
 FORCE_RETRAIN = True   # delete old .keras checkpoints and retrain from scratch
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PER-MODEL HYPERPARAMETER CONFIGS
-# Each model gets its own tuned lr, batch_size, epochs, patience, etc.
-# ─────────────────────────────────────────────────────────────────────────────
+
 MODEL_CONFIGS = {
     # Recurrent models — tuned for maximum NSE
     "LSTM": dict(
-        lr=1e-3, lr_min=1e-7, batch_size=64, epochs=500,
+        lr=1e-3, lr_min=1e-7, batch_size=(64*2), epochs=500,
         patience_es=60, patience_lr=20, lr_factor=0.50,
         n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
     "GRU": dict(
-        lr=1e-3, lr_min=1e-7, batch_size=64, epochs=500,
+        lr=1e-3, lr_min=1e-7, batch_size=(64*2), epochs=500,
         patience_es=60, patience_lr=20, lr_factor=0.50,
         n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
     "Bi-LSTM": dict(
-        lr=5e-4, lr_min=5e-8, batch_size=64, epochs=400,
+        lr=5e-4, lr_min=5e-8, batch_size=(64*2) , epochs=400,
         patience_es=50, patience_lr=18, lr_factor=0.50,
         n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
     "1D-CNN": dict(
-        lr=1e-3, lr_min=1e-7, batch_size=128, epochs=400,
+        lr=1e-3, lr_min=1e-7, batch_size=(128*2), epochs=400,
         patience_es=40, patience_lr=15, lr_factor=0.45,
         n_snapshots=5, n_tta=12, noise_std=0.002,
     ),
     "CNN-LSTM": dict(
-        lr=1e-3, lr_min=1e-7, batch_size=64, epochs=500,
+        lr=1e-3, lr_min=1e-7, batch_size=(64*2) , epochs=500,
         patience_es=60, patience_lr=20, lr_factor=0.50,
         n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
     "Transformer": dict(
-        lr=3e-4, lr_min=5e-8, batch_size=64, epochs=500,
         patience_es=60, patience_lr=20, lr_factor=0.50,
         n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
