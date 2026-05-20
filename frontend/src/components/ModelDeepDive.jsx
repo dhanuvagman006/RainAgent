@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   TrendingUp, BarChart2, GitCommit, AlignLeft,
   Layers, HelpCircle, CheckCircle, AlertCircle,

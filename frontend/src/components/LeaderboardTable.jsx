@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import { Component } from 'react';
 import { Trophy, ArrowUp, ArrowDown, Award } from 'lucide-react';
 
 /* ─────────────────────────────────────────────

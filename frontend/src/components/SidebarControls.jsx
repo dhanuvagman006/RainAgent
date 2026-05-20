@@ -1,4 +1,3 @@
-import React from 'react';
 import { Settings, Calendar, Maximize, Target, Database, Zap } from 'lucide-react';
 
 const inputClass =

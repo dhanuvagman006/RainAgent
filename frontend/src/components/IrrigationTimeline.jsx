@@ -1,4 +1,3 @@
-import React from 'react';
 import { Sun, CloudRain, Cloud, AlertTriangle, Droplet } from 'lucide-react';
 
 export default function IrrigationTimeline({ schedule }) {
