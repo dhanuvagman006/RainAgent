@@ -46,6 +46,7 @@ MODEL_CONFIGS = {
         n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
     "Transformer": dict(
+        lr=1e-3, lr_min=1e-7, batch_size=(64*4), epochs=400,
         patience_es=60, patience_lr=20, lr_factor=0.50,
         n_snapshots=7, n_tta=15, noise_std=0.002,
     ),
