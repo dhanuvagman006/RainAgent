@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
   Satellite, CloudRain, RefreshCw, CheckCircle2,
@@ -327,7 +327,11 @@ export default function ValidationPanel({ predictionData, selectedDate, selected
   }, []);
 
   useEffect(() => {
-    if (predictionData && selectedDate) fetchValidation(selectedDate);
+    if (!predictionData || !selectedDate) return;
+    const timerId = setTimeout(() => {
+      fetchValidation(selectedDate);
+    }, 0);
+    return () => clearTimeout(timerId);
   }, [predictionData, selectedDate, fetchValidation]);
 
   const imdValue = imdData?.data_available ? imdData.imd_actual_rainfall_mm : null;
