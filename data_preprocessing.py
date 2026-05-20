@@ -101,6 +101,10 @@ def load_and_clean_data(file_path):
     else:
         df.index = pd.date_range(start='2000-01-01', periods=len(df), freq='D')
 
+    return engineer_features(df)
+
+def engineer_features(df, target='prectotcorr'):
+    """Applies NSE-maximizing feature engineering to a DataFrame."""
     # Stash year for cumulative rain helper
     df['_year_'] = df.index.year
 
@@ -124,7 +128,6 @@ def load_and_clean_data(file_path):
     df['is_dry_season'] = m.isin([12, 1, 2, 3]).astype(np.float32)
 
     # ── 3. Rainfall lag features ────────────────────────────────────────────
-    target = 'prectotcorr'
     if target in df.columns:
         for lag in [1, 2, 3, 5, 7, 10, 14, 21, 30]:
             df[f'rain_lag_{lag}d']     = df[target].shift(lag).fillna(0)

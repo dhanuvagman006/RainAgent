@@ -93,55 +93,29 @@ def generate_synthetic_weather(target_date_str, lookback_days=60, horizon=1):
             'wd2m':              np.random.normal(base['wd2m'],             variance['wd2m']) % 360,
             'allsky_sfc_sw_dwn': max(0.0, np.random.normal(base['allsky_sfc_sw_dwn'],
                                                              variance['allsky_sfc_sw_dwn'])),
-            '_rain':             rain_val,   # internal — used for lag/rolling only
+            'prectotcorr':       rain_val,   # used for lag/rolling engineering
+            'date':              d,          # needed for time-based features
         }
         rows.append(row)
 
     df = pd.DataFrame(rows)
+    df = df.set_index('date')
 
     # ── Step 2: engineer the SAME features as data_preprocessing.py ──────────
+    from data_preprocessing import engineer_features
+    import json
+    import os
 
-    # Cyclical day-of-year
-    doy = pd.to_datetime(dict(year=df['year'], month=df['month'], day=df['day'])).dt.day_of_year.values
-    df['doy_sin'] = np.sin(2 * np.pi * doy / 365.25)
-    df['doy_cos'] = np.cos(2 * np.pi * doy / 365.25)
+    df = engineer_features(df, target='prectotcorr')
 
-    # Cyclical month
-    month_arr = df['month'].values
-    df['month_sin'] = np.sin(2 * np.pi * month_arr / 12.0)
-    df['month_cos'] = np.cos(2 * np.pi * month_arr / 12.0)
+    # ── Step 3: select EXACTLY the training features, in training order ────
+    meta_path = os.path.join("models", "scaler_meta.json")
+    if os.path.exists(meta_path):
+        with open(meta_path) as f:
+            meta = json.load(f)
+        feature_cols = meta["feature_cols"]
+    else:
+        # Fallback just in case
+        feature_cols = [c for c in df.columns if c != 'prectotcorr']
 
-    # Monsoon flag (June–September, matching Dakshina Kannada prior)
-    df['is_monsoon'] = df['month'].isin([6, 7, 8, 9]).astype(np.float32)
-
-    # Rainfall lag features (use synthetic _rain series)
-    rain = df['_rain']
-    df['rain_lag_1d']  = rain.shift(1).fillna(0)
-    df['rain_lag_3d']  = rain.shift(3).fillna(0)
-    df['rain_lag_7d']  = rain.shift(7).fillna(0)
-
-    # Rolling statistics
-    df['rain_roll7_mean']  = rain.rolling(7,  min_periods=1).mean()
-    df['rain_roll30_mean'] = rain.rolling(30, min_periods=1).mean()
-    df['rain_roll7_std']   = rain.rolling(7,  min_periods=1).std().fillna(0)
-
-    # Wet-day fraction (proportion of last 30 days with rain > 1 mm)
-    df['wet_day_frac30'] = (
-        (rain > 1.0).astype(float)
-        .rolling(30, min_periods=1).mean()
-    )
-
-    # ── Step 3: select EXACTLY the 23 training features, in training order ────
-    feature_cols = [
-        'year', 'month', 'day',
-        'ps', 't2m', 't2m_max', 't2m_min', 'rh2m', 'ws2m', 'wd2m',
-        'allsky_sfc_sw_dwn',
-        'doy_sin', 'doy_cos',
-        'month_sin', 'month_cos',
-        'is_monsoon',
-        'rain_lag_1d', 'rain_lag_3d', 'rain_lag_7d',
-        'rain_roll7_mean', 'rain_roll30_mean', 'rain_roll7_std',
-        'wet_day_frac30',
-    ]
-
-    return df[feature_cols].values  # shape: (total_days, 23)
+    return df[feature_cols].values  # shape: (total_days, num_features)
