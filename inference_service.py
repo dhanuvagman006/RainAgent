@@ -4,6 +4,7 @@ import joblib
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
+from models import WeightedSum, PositionalEncoding  # registers serializable custom layers
 
 MODELS_DIR = "models"
 MODEL_NAMES = ["LSTM", "GRU", "Bi-LSTM", "1D-CNN", "CNN-LSTM", "Transformer"]
@@ -22,7 +23,12 @@ def _composite_loss(y_true, y_pred):
     mse = tf.reduce_mean(tf.square(y_true - y_pred))
     return 0.7 * _nse_loss(y_true, y_pred) + 0.3 * mse
 
-_CUSTOM_OBJECTS = {'nse_loss': _nse_loss, 'composite_loss': _composite_loss}
+_CUSTOM_OBJECTS = {
+    'nse_loss': _nse_loss,
+    'composite_loss': _composite_loss,
+    'WeightedSum': WeightedSum,
+    'PositionalEncoding': PositionalEncoding,
+}
 
 class InferenceService:
     def __init__(self):
@@ -68,9 +74,19 @@ class InferenceService:
                 if os.path.exists(iso_path):
                     self.isotonic[name] = joblib.load(iso_path)
 
-            print("ML Artifacts loaded successfully.")
+            loaded = list(self.models.keys())
+            print(f"ML Artifacts loaded successfully. Models in memory: {loaded}")
         except Exception as e:
             print(f"Error loading artifacts: {e}")
+
+    def reload(self):
+        """Hot-reload all model artifacts from disk without restarting the server."""
+        self.models = {}
+        self.isotonic = {}
+        self.feature_scaler = None
+        self.target_scaler = None
+        self.load_artifacts()
+        return list(self.models.keys())
 
     def _inverse_transform(self, scaled_pred):
         """Undo MinMax scaling, then undo optional log1p."""

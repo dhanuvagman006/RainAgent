@@ -64,6 +64,13 @@ def get_metrics():
     return data
 
 
+@app.get("/reload-models")
+def reload_models():
+    """Hot-reload all ML model artifacts from disk without restarting the server."""
+    loaded = inference_service.reload()
+    return {"status": "ok", "models_loaded": loaded}
+
+
 # ── Validation response schema ────────────────────────────────────────────────
 class ValidationResponse(BaseModel):
     date:                   str
@@ -183,6 +190,10 @@ def predict_rainfall(request: PredictionRequest):
         
     # 2. Run Inference
     try:
+        # Auto-reload if the requested model isn't in memory (e.g. trained after server start)
+        if request.model_name != "Ensemble" and request.model_name not in inference_service.models:
+            print(f"Model {request.model_name} not in memory — attempting hot-reload...")
+            inference_service.reload()
         predictions = inference_service.predict(request.model_name, synthetic_data, request.horizon)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Inference failed: {e}")

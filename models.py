@@ -6,10 +6,21 @@ from tensorflow.keras.layers import (
     Flatten, Input, Dropout, GlobalAveragePooling1D,
     LayerNormalization, MultiHeadAttention, BatchNormalization,
     Add, Activation, SpatialDropout1D, AveragePooling1D,
-    Concatenate, Reshape, Lambda, Multiply
+    Concatenate, Reshape, Multiply
 )
 from tensorflow.keras.regularizers import l2
 import numpy as np
+
+
+@keras.saving.register_keras_serializable(package='RainAgent')
+class WeightedSum(keras.layers.Layer):
+    """Replaces Lambda(sum over time axis) — serializable attention pooling."""
+    def call(self, x):
+        return keras.ops.sum(x, axis=1)
+
+    def compute_output_shape(self, input_shape):
+        # (batch, time, features) -> (batch, features)
+        return (input_shape[0], input_shape[2])
 
 
 # ─────────────────────────────────────────────
@@ -58,7 +69,7 @@ def build_lstm(input_shape, y_days):
     # Soft attention pooling over time axis
     attn = Dense(1, activation='softmax')(x)   # (batch, T, 1)
     x    = Multiply()([x, attn])
-    x    = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)  # (batch, 128)
+    x    = WeightedSum()(x)  # (batch, 128)
 
     x = Dense(128, activation='relu', kernel_regularizer=l2(1e-5))(x)
     x = Dropout(0.10)(x)
@@ -99,7 +110,7 @@ def build_gru(input_shape, y_days):
     # Soft attention pooling
     attn = Dense(1, activation='softmax')(x)
     x    = Multiply()([x, attn])
-    x    = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)
+    x    = WeightedSum()(x)
 
     x = Dense(128, activation='relu', kernel_regularizer=l2(1e-5))(x)
     x = Dropout(0.10)(x)
@@ -135,7 +146,7 @@ def build_bilstm(input_shape, y_days):
     # Soft attention pooling
     attn_weights = Dense(1, activation='softmax')(x)
     x = Multiply()([x, attn_weights])
-    x = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)
+    x = WeightedSum()(x)
 
     x = Dense(128, activation='relu', kernel_regularizer=l2(1e-5))(x)
     x = Dropout(0.10)(x)
@@ -215,7 +226,7 @@ def build_cnn_lstm(input_shape, y_days):
     # Attention pooling (pure Keras ops)
     attn_weights = Dense(1, activation='softmax')(x)
     x = Multiply()([x, attn_weights])
-    x = Lambda(lambda t: keras.ops.sum(t, axis=1))(x)
+    x = WeightedSum()(x)
 
     x = Dense(128, activation='relu', kernel_regularizer=l2(1e-4))(x)
     x = Dropout(0.15)(x)
@@ -241,6 +252,7 @@ def _positional_encoding(seq_len, d_model):
     return pos_enc[tf.newaxis, :, :]  # (1, seq_len, d_model)
 
 
+@keras.saving.register_keras_serializable(package='RainAgent')
 class PositionalEncoding(tf.keras.layers.Layer):
     def __init__(self, seq_len, d_model, **kwargs):
         super().__init__(**kwargs)
