@@ -93,29 +93,26 @@ def generate_synthetic_weather(target_date_str, lookback_days=60, horizon=1):
             'wd2m':              np.random.normal(base['wd2m'],             variance['wd2m']) % 360,
             'allsky_sfc_sw_dwn': max(0.0, np.random.normal(base['allsky_sfc_sw_dwn'],
                                                              variance['allsky_sfc_sw_dwn'])),
-            'prectotcorr':       rain_val,   # used for lag/rolling engineering
-            'date':              d,          # needed for time-based features
+            '_rain':             rain_val,   # internal — used for lag/rolling only
         }
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    df = df.set_index('date')
 
-    # ── Step 2: engineer the SAME features as data_preprocessing.py ──────────
+    # ── Step 2: Set up target column and date index for data_preprocessing ────
+    # data_preprocessing.py expects 'prectotcorr' and a DatetimeIndex
+    df['prectotcorr'] = df['_rain']
+    df = df.drop(columns=['_rain'])
+    
+    # We create a 'date' column so engineer_features can set it as the index
+    df['date'] = pd.to_datetime(dict(year=df['year'], month=df['month'], day=df['day']))
+    
+    # ── Step 3: Call exact feature engineering used during training ───────────
     from data_preprocessing import engineer_features
-    import json
-    import os
+    df_engineered = engineer_features(df, target='prectotcorr')
+    
+    # Drop the target column to return only features
+    if 'prectotcorr' in df_engineered.columns:
+        df_engineered = df_engineered.drop(columns=['prectotcorr'])
 
-    df = engineer_features(df, target='prectotcorr')
-
-    # ── Step 3: select EXACTLY the training features, in training order ────
-    meta_path = os.path.join("models", "scaler_meta.json")
-    if os.path.exists(meta_path):
-        with open(meta_path) as f:
-            meta = json.load(f)
-        feature_cols = meta["feature_cols"]
-    else:
-        # Fallback just in case
-        feature_cols = [c for c in df.columns if c != 'prectotcorr']
-
-    return df[feature_cols].values  # shape: (total_days, num_features)
+    return df_engineered.values  # shape: (total_days, 70)

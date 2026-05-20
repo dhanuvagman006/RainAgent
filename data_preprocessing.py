@@ -77,14 +77,11 @@ def _cumulative_season_rain(df_with_date, rainfall_col):
 # Main function
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_and_clean_data(file_path):
+def engineer_features(df, target='prectotcorr'):
     """
-    Load CSV, clean NaNs, and engineer ≥45 hydrologically-meaningful features.
+    Clean NaNs, and engineer ≥45 hydrologically-meaningful features.
     Returns a cleaned, feature-enriched DataFrame.
     """
-    print(f"[DATA] Loading {file_path} ...")
-    df = pd.read_csv(file_path)
-
     # Forward-fill then linear interpolate (preserves temporal ordering)
     df = df.ffill().interpolate(method='linear', limit_direction='both')
 
@@ -98,13 +95,9 @@ def load_and_clean_data(file_path):
     if date_col:
         df[date_col] = pd.to_datetime(df[date_col])
         df = df.set_index(date_col)
-    else:
+    elif not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.date_range(start='2000-01-01', periods=len(df), freq='D')
 
-    return engineer_features(df)
-
-def engineer_features(df, target='prectotcorr'):
-    """Applies NSE-maximizing feature engineering to a DataFrame."""
     # Stash year for cumulative rain helper
     df['_year_'] = df.index.year
 
@@ -202,6 +195,15 @@ def engineer_features(df, target='prectotcorr'):
     print(f"[DATA] Shape after feature engineering: {df.shape}")
     print(f"[DATA] {len([c for c in df.columns if c != target])} features → target '{target}'")
     return df
+
+def load_and_clean_data(file_path):
+    """
+    Load CSV, clean NaNs, and engineer ≥45 hydrologically-meaningful features.
+    Returns a cleaned, feature-enriched DataFrame.
+    """
+    print(f"[DATA] Loading {file_path} ...")
+    df = pd.read_csv(file_path)
+    return engineer_features(df)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
